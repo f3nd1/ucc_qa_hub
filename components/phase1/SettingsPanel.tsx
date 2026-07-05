@@ -1,13 +1,12 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import type { Settings } from "@/lib/qmr-engine";
+import { erpApiList } from "@/lib/qmr-engine";
+import { supabaseTest } from "@/lib/store/supabaseSync";
+import { chatModels, fetchOpenAIModels } from "@/lib/integrations/openai";
+import { requestDriveToken } from "@/lib/integrations/googleDrive";
 
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontWeight: 500,
-  fontSize: 11.5,
-  color: "var(--navy)",
-  marginBottom: 3,
-};
+const labelStyle: React.CSSProperties = { display: "block", fontWeight: 500, fontSize: 11.5, color: "var(--navy)", marginBottom: 3 };
 const inputStyle: React.CSSProperties = {
   width: "100%",
   border: "1px solid var(--border)",
@@ -17,17 +16,43 @@ const inputStyle: React.CSSProperties = {
   background: "#fff",
   fontFamily: "inherit",
 };
+const hint: React.CSSProperties = { fontSize: 11.5, color: "var(--muted)", marginTop: 3 };
+const testBtn: React.CSSProperties = {
+  border: "1px solid var(--navy)",
+  background: "#fff",
+  color: "var(--navy)",
+  borderRadius: 4,
+  padding: "5px 10px",
+  fontSize: 11.5,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
 
-/** Minimal settings for Phase 1: the browser-key OpenAI pattern + reviewer. */
-export function SettingsPanel({
-  settings,
-  onSave,
-  onClose,
-}: {
-  settings: Settings;
-  onSave: (patch: Settings) => void;
-  onClose: () => void;
-}) {
+type TestKey = "openai" | "erp" | "supabase" | "google";
+type Status = { ok: boolean; msg: string };
+
+function Section({ title, first, children }: { title: string; first?: boolean; children: ReactNode }) {
+  return (
+    <div style={{ borderTop: first ? "none" : "1px solid var(--border-light)", paddingTop: first ? 0 : 14, marginTop: first ? 0 : 16 }}>
+      <h4 style={{ color: "var(--navy)", fontSize: 12.5, margin: "0 0 10px" }}>{title}</h4>
+      {children}
+    </div>
+  );
+}
+
+function StatusLine({ s }: { s?: Status }) {
+  if (!s) return null;
+  return (
+    <div style={{ fontSize: 11.5, marginTop: 5, color: s.ok ? "var(--ok)" : "var(--err)" }}>
+      {s.ok ? "✓ " : "✕ "}
+      {s.msg}
+    </div>
+  );
+}
+
+/** Grouped, sectioned settings with per-integration connection tests and an
+    OpenAI model picker. Used both as a flat page and as a 3D-office window. */
+export function SettingsPanel({ settings, onSave }: { settings: Settings; onSave: (patch: Settings) => void; onClose?: () => void }) {
   const [key, setKey] = useState(settings.openaiKey || "");
   const [model, setModel] = useState(settings.openaiModel || "gpt-4o-mini");
   const [finalModel, setFinalModel] = useState(settings.finalModel || "gpt-4o");
@@ -39,144 +64,175 @@ export function SettingsPanel({
   const [supabaseKey, setSupabaseKey] = useState(settings.supabaseKey || "");
   const [googleClientId, setGoogleClientId] = useState(settings.googleClientId || "");
 
+  const [models, setModels] = useState<string[]>([]);
+  const [status, setStatus] = useState<Partial<Record<TestKey, Status>>>({});
+  const [busy, setBusy] = useState<TestKey | "">("");
+
+  const setS = (k: TestKey, ok: boolean, msg: string) => setStatus((s) => ({ ...s, [k]: { ok, msg } }));
+
+  async function testOpenAI() {
+    setBusy("openai");
+    try {
+      const ids = await fetchOpenAIModels(key);
+      const chat = chatModels(ids);
+      setModels(chat);
+      setS("openai", true, "Key works. " + chat.length + " models available — pick from the dropdowns below.");
+    } catch (e) {
+      setS("openai", false, (e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function testErp() {
+    setBusy("erp");
+    try {
+      const recs = await erpApiList({ url: erpUrl, token: erpToken });
+      setS("erp", true, "Connected. " + recs.length + " record(s) visible.");
+    } catch (e) {
+      setS("erp", false, (e as Error).message + " (check URL, token, CORS)");
+    } finally {
+      setBusy("");
+    }
+  }
+  async function testSupabase() {
+    setBusy("supabase");
+    try {
+      await supabaseTest({ url: supabaseUrl, key: supabaseKey });
+      setS("supabase", true, "Connected. qmr_project table reachable.");
+    } catch (e) {
+      setS("supabase", false, (e as Error).message + " (run the migration SQL first?)");
+    } finally {
+      setBusy("");
+    }
+  }
+  async function testGoogle() {
+    setBusy("google");
+    try {
+      await requestDriveToken(googleClientId);
+      setS("google", true, "Signed in — Drive access granted.");
+    } catch (e) {
+      setS("google", false, (e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function save() {
+    onSave({
+      openaiKey: key.trim(),
+      openaiModel: model.trim(),
+      finalModel: finalModel.trim(),
+      selfCheck,
+      reviewer: reviewer.trim(),
+      erpUrl: erpUrl.trim(),
+      erpToken: erpToken.trim(),
+      supabaseUrl: supabaseUrl.trim(),
+      supabaseKey: supabaseKey.trim(),
+      googleClientId: googleClientId.trim(),
+    });
+  }
+
   return (
-    <div
-      style={{
-        border: "1px solid var(--border-light)",
-        borderRadius: 8,
-        background: "#fff",
-        padding: 16,
-        marginBottom: 18,
-        maxWidth: 620,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
-        <h3 style={{ margin: 0, color: "var(--navy)", fontSize: 14 }}>Settings</h3>
-        <button
-          onClick={onClose}
-          style={{ marginLeft: "auto", background: "none", border: "none", fontSize: 18, color: "var(--muted)", cursor: "pointer" }}
-        >
-          ×
-        </button>
-      </div>
-
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>OpenAI API key</label>
-        <input
-          style={inputStyle}
-          type="password"
-          placeholder="sk-..."
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-        />
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>
-          Stored in this browser only. Use a spend-capped, scoped key. Not needed to load the demo or to
-          see the refuse rule.
+    <div style={{ maxWidth: 640 }}>
+      <Section title="OpenAI" first>
+        <div style={{ marginBottom: 10 }}>
+          <label style={labelStyle}>API key</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={inputStyle} type="password" placeholder="sk-..." value={key} onChange={(e) => setKey(e.target.value)} />
+            <button style={testBtn} onClick={testOpenAI} disabled={busy === "openai"}>
+              {busy === "openai" ? "Testing…" : "Test & fetch models"}
+            </button>
+          </div>
+          <div style={hint}>Stored in this browser only. Use a spend-capped, scoped key. Not needed for the demo or the refuse rule.</div>
+          <StatusLine s={status.openai} />
         </div>
-      </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        <div style={{ flex: "1 1 200px" }}>
-          <label style={labelStyle}>Bulk model (fast, cheap)</label>
-          <input style={inputStyle} value={model} onChange={(e) => setModel(e.target.value)} />
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+          <div style={{ flex: "1 1 200px" }}>
+            <label style={labelStyle}>Bulk model (fast, cheap)</label>
+            <input style={inputStyle} list="openai-models" value={model} onChange={(e) => setModel(e.target.value)} />
+          </div>
+          <div style={{ flex: "1 1 200px" }}>
+            <label style={labelStyle}>Final model (stronger)</label>
+            <input style={inputStyle} list="openai-models" value={finalModel} onChange={(e) => setFinalModel(e.target.value)} />
+          </div>
+          <datalist id="openai-models">
+            {models.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
         </div>
-        <div style={{ flex: "1 1 200px" }}>
-          <label style={labelStyle}>Final model (stronger)</label>
-          <input style={inputStyle} value={finalModel} onChange={(e) => setFinalModel(e.target.value)} />
+        {models.length > 0 && <div style={hint}>{models.length} models loaded — start typing in a field to pick one.</div>}
+
+        <div style={{ marginTop: 8 }}>
+          <label style={{ fontSize: 12.5 }}>
+            <input type="checkbox" checked={selfCheck} onChange={(e) => setSelfCheck(e.target.checked)} style={{ marginRight: 6 }} />
+            Self-check pass (AI reviews and corrects its own draft)
+          </label>
         </div>
-      </div>
+      </Section>
 
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ fontSize: 12.5 }}>
-          <input
-            type="checkbox"
-            checked={selfCheck}
-            onChange={(e) => setSelfCheck(e.target.checked)}
-            style={{ marginRight: 6 }}
-          />
-          Self-check pass (AI reviews and corrects its own draft)
-        </label>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
+      <Section title="Reviewer">
         <label style={labelStyle}>Your name (recorded on sign-off)</label>
         <input style={inputStyle} value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
-      </div>
+      </Section>
 
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>ERPNext base URL</label>
-        <input style={inputStyle} value={erpUrl} onChange={(e) => setErpUrl(e.target.value)} placeholder="https://your-site.example.com" />
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>ERPNext API key : secret</label>
-        <input
-          style={inputStyle}
-          type="password"
-          value={erpToken}
-          onChange={(e) => setErpToken(e.target.value)}
-          placeholder="key:secret"
-        />
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>
-          Sent as <span style={{ fontFamily: "var(--mono)" }}>Authorization: token key:secret</span>. If CORS
-          blocks calls, host the app same-origin with ERPNext.
+      <Section title="ERPNext">
+        <div style={{ marginBottom: 10 }}>
+          <label style={labelStyle}>Base URL</label>
+          <input style={inputStyle} value={erpUrl} onChange={(e) => setErpUrl(e.target.value)} placeholder="https://your-site.example.com" />
         </div>
-      </div>
-
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Supabase project URL</label>
-        <input style={inputStyle} value={supabaseUrl} onChange={(e) => setSupabaseUrl(e.target.value)} placeholder="https://xxxx.supabase.co" />
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>Supabase anon key</label>
-        <input
-          style={inputStyle}
-          type="password"
-          value={supabaseKey}
-          onChange={(e) => setSupabaseKey(e.target.value)}
-          placeholder="eyJhbGciOi…"
-        />
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>
-          Run the migration SQL first (Export menu). Sync stores the whole project as one row in{" "}
-          <span style={{ fontFamily: "var(--mono)" }}>qmr_project</span>.
+        <label style={labelStyle}>API key : secret</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={inputStyle} type="password" value={erpToken} onChange={(e) => setErpToken(e.target.value)} placeholder="key:secret" />
+          <button style={testBtn} onClick={testErp} disabled={busy === "erp"}>
+            {busy === "erp" ? "Testing…" : "Test connection"}
+          </button>
         </div>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>Google OAuth client id (Drive)</label>
-        <input style={inputStyle} value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} placeholder="xxxx.apps.googleusercontent.com" />
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>
-          Enables “Pull from Drive” in the criterion library (read-only Drive access).
+        <div style={hint}>
+          Sent as <span style={{ fontFamily: "var(--mono)" }}>Authorization: token key:secret</span>. If CORS blocks calls, host the app same-origin with ERPNext.
         </div>
-      </div>
+        <StatusLine s={status.erp} />
+      </Section>
 
-      <button
-        onClick={() =>
-          onSave({
-            openaiKey: key.trim(),
-            openaiModel: model.trim(),
-            finalModel: finalModel.trim(),
-            selfCheck,
-            reviewer: reviewer.trim(),
-            erpUrl: erpUrl.trim(),
-            erpToken: erpToken.trim(),
-            supabaseUrl: supabaseUrl.trim(),
-            supabaseKey: supabaseKey.trim(),
-            googleClientId: googleClientId.trim(),
-          })
-        }
-        style={{
-          background: "var(--navy)",
-          color: "#fff",
-          border: "none",
-          borderRadius: 4,
-          padding: "7px 14px",
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: "pointer",
-        }}
-      >
-        Save settings
-      </button>
+      <Section title="Supabase">
+        <div style={{ marginBottom: 10 }}>
+          <label style={labelStyle}>Project URL</label>
+          <input style={inputStyle} value={supabaseUrl} onChange={(e) => setSupabaseUrl(e.target.value)} placeholder="https://xxxx.supabase.co" />
+        </div>
+        <label style={labelStyle}>Anon key</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={inputStyle} type="password" value={supabaseKey} onChange={(e) => setSupabaseKey(e.target.value)} placeholder="eyJhbGciOi…" />
+          <button style={testBtn} onClick={testSupabase} disabled={busy === "supabase"}>
+            {busy === "supabase" ? "Testing…" : "Test connection"}
+          </button>
+        </div>
+        <div style={hint}>
+          Run the migration SQL first (Export menu). Sync stores the whole project as one row in <span style={{ fontFamily: "var(--mono)" }}>qmr_project</span>.
+        </div>
+        <StatusLine s={status.supabase} />
+      </Section>
+
+      <Section title="Google Drive">
+        <label style={labelStyle}>OAuth client id</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={inputStyle} value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} placeholder="xxxx.apps.googleusercontent.com" />
+          <button style={testBtn} onClick={testGoogle} disabled={busy === "google"}>
+            {busy === "google" ? "…" : "Test sign-in"}
+          </button>
+        </div>
+        <div style={hint}>Enables “Pull from Drive” in the criterion library (read-only Drive access).</div>
+        <StatusLine s={status.google} />
+      </Section>
+
+      <div style={{ marginTop: 18 }}>
+        <button
+          onClick={save}
+          style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 4, padding: "8px 16px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+        >
+          Save settings
+        </button>
+      </div>
     </div>
   );
 }

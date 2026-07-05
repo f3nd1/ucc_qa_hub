@@ -30,6 +30,7 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>(emptyFilter());
   const [busyName, setBusyName] = useState<string | null>(null);
+  const [view, setView] = useState<"records" | "settings" | "library">("records");
   const [modal, setModal] = useState<ModalKind>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [critPre, setCritPre] = useState<string | undefined>(undefined);
@@ -92,7 +93,7 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
         <button className="tb-btn" onClick={() => setModal("agents")}>
           Agent office
         </button>
-        <button className="tb-btn" onClick={() => { setCritPre(undefined); setModal("library"); }}>
+        <button className="tb-btn" onClick={() => { setCritPre(undefined); setView("library"); }}>
           Criterion library
         </button>
         <button
@@ -126,11 +127,30 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
             <button onClick={() => exp("migration")}>Download migration SQL</button>
           </div>
         </div>
-        <button className="tb-btn primary" onClick={() => setModal("settings")}>
+        <button className="tb-btn primary" onClick={() => setView("settings")}>
           Settings
         </button>
       </div>
 
+      {view === "settings" ? (
+        <div style={{ padding: "16px 20px 70px", maxWidth: 900 }}>
+          <button className="act-btn" style={{ marginBottom: 12 }} onClick={() => setView("records")}>
+            ← Back to records
+          </button>
+          <h2 style={{ color: "var(--navy)", fontSize: 16, margin: "0 0 12px" }}>Settings</h2>
+          <SettingsPanel settings={db.settings} onSave={wb.saveSettings} />
+        </div>
+      ) : view === "library" ? (
+        <div style={{ padding: "16px 20px 70px", maxWidth: 900 }}>
+          <button className="act-btn" style={{ marginBottom: 12 }} onClick={() => setView("records")}>
+            ← Back to records
+          </button>
+          <h2 style={{ color: "var(--navy)", fontSize: 16, margin: "0 0 12px" }}>
+            Criterion library — GD4 requirement + procedure per criterion
+          </h2>
+          <CriterionLibrary db={db} onSave={wb.saveCriterion} onClearProc={wb.clearProc} onRestoreProc={wb.restoreProc} notify={notify} initialCriterion={critPre} />
+        </div>
+      ) : (
       <div className="layout">
         <Sidebar
           db={db}
@@ -159,7 +179,7 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
               onFinaliseRecord={() => wb.finaliseRecordNow(selected!)}
               onEditCriterion={(c) => {
                 setCritPre(c || undefined);
-                setModal("library");
+                setView("library");
               }}
             />
           ) : (
@@ -200,6 +220,7 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
           )}
         </div>
       </div>
+      )}
 
       {modal === "cycles" && (
         <Modal title="Monitoring cycles" onClose={() => setModal(null)}>
@@ -215,23 +236,6 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
               wb.deleteCycleNow(id);
               setSelected(null);
             }}
-          />
-        </Modal>
-      )}
-      {modal === "library" && (
-        <Modal title="Criterion library — GD4 requirement + procedure per criterion" wide onClose={() => setModal(null)}>
-          <CriterionLibrary db={db} onSave={wb.saveCriterion} onClearProc={wb.clearProc} onRestoreProc={wb.restoreProc} notify={notify} initialCriterion={critPre} />
-        </Modal>
-      )}
-      {modal === "settings" && (
-        <Modal title="Settings" onClose={() => setModal(null)}>
-          <SettingsPanel
-            settings={db.settings}
-            onSave={(p) => {
-              wb.saveSettings(p);
-              setModal(null);
-            }}
-            onClose={() => setModal(null)}
           />
         </Modal>
       )}

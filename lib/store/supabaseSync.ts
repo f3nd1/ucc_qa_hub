@@ -46,6 +46,15 @@ export async function pushProject(cfg: SupabaseConfig, db: Db, now: string): Pro
   }
 }
 
+/** Connectivity test: a lightweight select against qmr_project. */
+export async function supabaseTest(cfg: SupabaseConfig): Promise<void> {
+  const res = await fetch(base(cfg) + "/rest/v1/qmr_project?select=id&limit=1", { headers: headers(cfg) });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error("HTTP " + res.status + ": " + t.slice(0, 120));
+  }
+}
+
 /** Load the whole project from qmr_project (null if none stored yet). */
 export async function pullProject(cfg: SupabaseConfig): Promise<Db | null> {
   const res = await fetch(base(cfg) + "/rest/v1/qmr_project?id=eq." + ROW_ID + "&select=data", {
