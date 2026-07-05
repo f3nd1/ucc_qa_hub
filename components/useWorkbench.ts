@@ -4,18 +4,23 @@ import { useCallback } from "react";
 import { store, useDb } from "@/lib/store/store";
 import {
   aiDraft,
+  bulkFinalise,
+  createCycle,
+  deleteCycle,
   DEMO_PROC,
   exportFlat,
   exportImportCSV,
   exportProject,
   loadDemo,
   MIGRATION_SQL,
+  renameCycle,
   setProcedure,
   setReview,
+  switchCycle,
   updateItem,
 } from "@/lib/qmr-engine";
-import type { Item, ReviewState, Settings } from "@/lib/qmr-engine";
-import { toggleAgent } from "@/lib/agents";
+import type { Agent, Item, ReviewState, Settings } from "@/lib/qmr-engine";
+import { addAgent, removeAgent, toggleAgent, updateAgent } from "@/lib/agents";
 import { download } from "./phase1/download";
 
 export type ToastKind = "ok" | "err" | "info";
@@ -88,6 +93,57 @@ export function useWorkbench(notify: Notify) {
     store.set(toggleAgent(store.getState(), id));
   }, []);
 
+  const updateAgentNow = useCallback((id: string, patch: Partial<Agent>) => {
+    store.set(updateAgent(store.getState(), id, patch));
+  }, []);
+
+  const addAgentNow = useCallback(
+    (agent: Agent) => {
+      store.set(addAgent(store.getState(), agent));
+      notify("Added agent “" + agent.name + "” — its desk is in the office.", "ok");
+    },
+    [notify],
+  );
+
+  const removeAgentNow = useCallback(
+    (id: string, name: string) => {
+      store.set(removeAgent(store.getState(), id));
+      notify("Removed agent “" + name + "”.", "ok");
+    },
+    [notify],
+  );
+
+  const createCycleNow = useCallback(
+    (name: string, from: string, to: string, seedId: string | null) => {
+      const r = createCycle(store.getState(), name, from, to, seedId);
+      store.set(r.db);
+      notify(seedId ? "Cycle created, carried forward from the prior cycle." : "Cycle created.", "ok");
+    },
+    [notify],
+  );
+
+  const switchCycleNow = useCallback((id: string) => {
+    store.set(switchCycle(store.getState(), id));
+  }, []);
+
+  const renameCycleNow = useCallback((id: string, name: string) => {
+    store.set(renameCycle(store.getState(), id, name));
+  }, []);
+
+  const deleteCycleNow = useCallback(
+    (id: string) => {
+      store.set(deleteCycle(store.getState(), id));
+      notify("Cycle deleted.", "ok");
+    },
+    [notify],
+  );
+
+  const bulkFinaliseNow = useCallback(() => {
+    const r = bulkFinalise(store.getState());
+    store.set(r.db);
+    notify(r.message, r.blocked ? "err" : "ok");
+  }, [notify]);
+
   const exportFile = useCallback(
     (kind: ExportKind) => {
       if (kind === "migration") {
@@ -109,5 +165,24 @@ export function useWorkbench(notify: Notify) {
     [notify],
   );
 
-  return { db, loadDemoNow, saveSettings, clearProc, restoreProc, patch, review, draft, toggleAgentNow, exportFile };
+  return {
+    db,
+    loadDemoNow,
+    saveSettings,
+    clearProc,
+    restoreProc,
+    patch,
+    review,
+    draft,
+    toggleAgentNow,
+    updateAgentNow,
+    addAgentNow,
+    removeAgentNow,
+    createCycleNow,
+    switchCycleNow,
+    renameCycleNow,
+    deleteCycleNow,
+    bulkFinaliseNow,
+    exportFile,
+  };
 }

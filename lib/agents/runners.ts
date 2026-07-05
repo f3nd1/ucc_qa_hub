@@ -9,6 +9,7 @@ import {
   rowChecks,
   setReview,
 } from "@/lib/qmr-engine";
+import { kindOf } from "./config";
 import type { RunTarget, StepFinding, StepRefusal, StepResult } from "./types";
 
 /* =========================================================
@@ -226,9 +227,9 @@ const signoff: Runner = async (db, agent, target) => {
 
 const RUNNERS: Record<string, Runner> = { grounder, drafter, shortfall, consistency, signoff };
 
-/** Invoke one agent's runner. Unknown ids return a no-op error step. */
+/** Invoke one agent's runner (by kind). Unknown kinds return a no-op error step. */
 export async function runAgent(db: Db, agent: Agent, target: RunTarget): Promise<StepResult> {
-  const runner = RUNNERS[agent.id];
-  if (!runner) return base(agent, { status: "error", summary: "No runner is defined for " + agent.id + "." });
+  const runner = RUNNERS[kindOf(agent)];
+  if (!runner) return base(agent, { status: "error", summary: "No runner is defined for " + kindOf(agent) + "." });
   return runner(db, agent, target);
 }

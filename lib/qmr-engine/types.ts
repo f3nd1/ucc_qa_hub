@@ -106,6 +106,9 @@ export interface Exemplars {
 export type AgentScope = "activity" | "record" | "cycle";
 export interface Agent {
   id: string;
+  /** Which runner behaviour to use (grounder|drafter|shortfall|consistency|signoff).
+      Defaults to id for the built-in agents. A custom agent picks a kind to reuse. */
+  kind?: string;
   name: string;
   role: string; // short description shown at the desk
   systemPrompt: string; // grounding + behaviour

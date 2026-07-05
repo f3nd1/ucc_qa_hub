@@ -82,6 +82,14 @@ export const DEFAULT_AGENTS: Agent[] = [
   },
 ];
 
+/** The runner behaviour an agent uses (kind falls back to id for built-ins). */
+export function kindOf(a: Agent): string {
+  return a.kind ?? a.id;
+}
+
+/** The five specialist behaviours a custom agent can reuse. */
+export const AGENT_KINDS = CANONICAL_ORDER;
+
 /** Effective agents: the user's edited config, or the defaults if none saved. */
 export function getAgents(db: Db): Agent[] {
   return db.agents && db.agents.length ? db.agents : DEFAULT_AGENTS;
@@ -96,6 +104,37 @@ export function setAgents(db: Db, agents: Agent[]): Db {
 
 /** Toggle one agent enabled/disabled, seeding the config from defaults if empty. */
 export function toggleAgent(db: Db, id: string): Db {
-  const base = getAgents(db).map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a));
-  return setAgents(db, base);
+  return setAgents(
+    db,
+    getAgents(db).map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a)),
+  );
+}
+
+/** Patch one agent's fields. */
+export function updateAgent(db: Db, id: string, patch: Partial<Agent>): Db {
+  return setAgents(
+    db,
+    getAgents(db).map((a) => (a.id === id ? { ...a, ...patch } : a)),
+  );
+}
+
+/** Remove an agent (the orchestrator cannot be removed). */
+export function removeAgent(db: Db, id: string): Db {
+  if (id === "orchestrator") return db;
+  return setAgents(
+    db,
+    getAgents(db).filter((a) => a.id !== id),
+  );
+}
+
+/** A desk position for the next agent, spread on a ring so desks do not overlap. */
+export function nextDeskPosition(agents: Agent[]): [number, number, number] {
+  const n = agents.filter((a) => a.id !== "orchestrator").length;
+  const angle = (n / 6) * Math.PI * 2;
+  return [Number((Math.sin(angle) * 5).toFixed(2)), 0, Number((-Math.cos(angle) * 4).toFixed(2))];
+}
+
+/** Add a new agent (a new desk). Caller supplies id/name/kind/color/scope. */
+export function addAgent(db: Db, agent: Agent): Db {
+  return setAgents(db, [...getAgents(db), agent]);
 }

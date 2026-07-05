@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { useDb } from "@/lib/store/store";
-import { recordOrder, records, rowKey } from "@/lib/qmr-engine";
+import { activeCycle, emptyFilter, recordOrder, recordPassesFilter, records, rowKey } from "@/lib/qmr-engine";
+import type { Filter } from "@/lib/qmr-engine";
 import { getAgents } from "@/lib/agents";
 import { useWorkbench } from "../useWorkbench";
 import type { Notify } from "../useWorkbench";
@@ -14,8 +15,12 @@ import { RecordCard } from "../phase1/RecordCard";
 import { SettingsPanel } from "../phase1/SettingsPanel";
 import { AgentPanel } from "./AgentPanel";
 import { CriterionLibrary } from "./CriterionLibrary";
+import { AgentEditor } from "./AgentEditor";
+import { CycleManager } from "./CycleManager";
+import { FiltersPanel } from "./FiltersPanel";
+import { SignOffPanel } from "./SignOffPanel";
 
-type WinKind = "orchestrator" | "settings" | "library" | "record" | "agent";
+type WinKind = "orchestrator" | "settings" | "library" | "record" | "agent" | "agents-config" | "cycles" | "filters" | "signoff";
 interface WinItem {
   id: string;
   kind: WinKind;
@@ -33,11 +38,26 @@ const TITLES: Record<WinKind, string> = {
   library: "Criterion library",
   record: "Record editor",
   agent: "Agent",
+  "agents-config": "Configure agents",
+  cycles: "Monitoring cycles",
+  filters: "Filters",
+  signoff: "Sign-off",
 };
 
 export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () => void }) {
-  const { db, loadDemoNow, saveSettings, clearProc, restoreProc, patch, review, draft, toggleAgentNow, exportFile } =
-    useWorkbench(notify);
+  const wb = useWorkbench(notify);
+  const {
+    db,
+    loadDemoNow,
+    saveSettings,
+    clearProc,
+    restoreProc,
+    patch,
+    review,
+    draft,
+    toggleAgentNow,
+    exportFile,
+  } = wb;
 
   const order = recordOrder(db);
   const agents = getAgents(db);
@@ -48,7 +68,10 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
   const [pos, setPos] = useState<Record<string, Pos>>({});
   const [selectedRecord, setSelectedRecord] = useState<string>("");
   const [busyName, setBusyName] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>(emptyFilter());
   const zc = useRef(20);
+
+  const shelfOrder = order.filter((p) => recordPassesFilter(records(db)[p], filter));
 
   useEffect(() => {
     setMounted(true);
@@ -107,6 +130,43 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
         return <SettingsPanel settings={db.settings} onSave={saveSettings} onClose={() => closeWin("settings")} />;
       case "library":
         return <CriterionLibrary db={db} onClearProc={clearProc} onRestoreProc={restoreProc} />;
+      case "agents-config":
+        return (
+          <AgentEditor
+            db={db}
+            onUpdate={wb.updateAgentNow}
+            onAdd={wb.addAgentNow}
+            onRemove={wb.removeAgentNow}
+          />
+        );
+      case "cycles":
+        return (
+          <CycleManager
+            db={db}
+            onCreate={wb.createCycleNow}
+            onSwitch={(id) => {
+              wb.switchCycleNow(id);
+              setSelectedRecord("");
+            }}
+            onRename={wb.renameCycleNow}
+            onDelete={(id) => {
+              wb.deleteCycleNow(id);
+              setSelectedRecord("");
+            }}
+          />
+        );
+      case "filters":
+        return (
+          <FiltersPanel
+            db={db}
+            filter={filter}
+            onChange={setFilter}
+            matchCount={shelfOrder.length}
+            totalCount={order.length}
+          />
+        );
+      case "signoff":
+        return <SignOffPanel db={db} onBulkFinalise={wb.bulkFinaliseNow} onOpenRecord={selectRecord} />;
       case "agent": {
         const agent = agents.find((a) => a.id === w.agentId);
         if (!agent) return <div>Agent not found.</div>;
@@ -148,8 +208,8 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
     return undefined;
   }
   function winWidth(w: WinItem): number {
-    if (w.kind === "record") return 560;
-    if (w.kind === "orchestrator") return 620;
+    if (w.kind === "record" || w.kind === "signoff") return 560;
+    if (w.kind === "orchestrator" || w.kind === "agents-config" || w.kind === "filters") return 620;
     return 460;
   }
 
@@ -170,7 +230,22 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
         }}
       >
         <h1 style={{ fontSize: 15, margin: 0, fontWeight: 600, letterSpacing: 0.3 }}>QMR Agent Office</h1>
-        <span style={{ fontSize: 11.5, opacity: 0.75 }}>Phase 3 · 3D office</span>
+        <span style={{ fontSize: 11.5, opacity: 0.75 }}>Phase 4</span>
+        <button
+          onClick={() => openWin({ id: "cycles", kind: "cycles" })}
+          style={{
+            background: "rgba(255,255,255,.14)",
+            border: "1px solid rgba(255,255,255,.3)",
+            color: "#fff",
+            borderRadius: 14,
+            padding: "3px 12px",
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+          title="Monitoring cycles"
+        >
+          Cycle: <b>{activeCycle(db)?.name || "none"}</b> ▾
+        </button>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={{ ...tbBtn, background: "rgba(255,255,255,.22)" }} onClick={onSetMode}>
             Flat mode
@@ -181,14 +256,20 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
           <button style={tbBtn} onClick={openOrchestrator}>
             Orchestrator
           </button>
+          <button style={tbBtn} onClick={() => openWin({ id: "filters", kind: "filters" })}>
+            Filters{filter.main || filter.sub || filter.department || filter.status || filter.review ? " ●" : ""}
+          </button>
+          <button style={tbBtn} onClick={() => openWin({ id: "signoff", kind: "signoff" })}>
+            Sign-off
+          </button>
           <button style={tbBtn} onClick={() => openWin({ id: "library", kind: "library" })}>
             Criterion library
           </button>
+          <button style={tbBtn} onClick={() => openWin({ id: "agents-config", kind: "agents-config" })}>
+            Configure agents
+          </button>
           <button style={tbBtn} onClick={() => exportFile("flat")}>
             Export CSV
-          </button>
-          <button style={tbBtn} onClick={() => exportFile("project")}>
-            Save project
           </button>
           <button
             style={{ ...tbBtn, background: "#fff", color: "var(--navy)", fontWeight: 600 }}
@@ -199,14 +280,22 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
         </div>
       </div>
 
-      {/* 3D canvas */}
-      <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+      {/* 3D canvas. zIndex:0 makes this its own stacking context so the drei
+          Html desk labels (which use very high z-indexes) stay contained below
+          the draggable window overlay rather than intercepting its clicks. */}
+      <div style={{ position: "relative", flex: 1, minHeight: 0, zIndex: 0 }}>
         {mounted && (
-          <Canvas shadows={false} dpr={[1, 2]} camera={{ position: [0, 6, 13], fov: 45 }} style={{ width: "100%", height: "100%" }}>
+          <Canvas
+            frameloop="demand"
+            shadows={false}
+            dpr={[1, 2]}
+            camera={{ position: [0, 6, 13], fov: 45 }}
+            style={{ width: "100%", height: "100%" }}
+          >
             <Scene
               db={db}
               agents={agents}
-              order={order}
+              order={shelfOrder}
               reducedMotion={reducedMotion}
               onOpenOrchestrator={openOrchestrator}
               onOpenAgent={openAgent}

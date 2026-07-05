@@ -13,12 +13,13 @@ in (priority order) the GD4 requirement, the UCC procedure, the evidence, and
 the user's note. If a claim cannot be grounded, the tool refuses and asks a
 precise question rather than inventing a plausible sentence.
 
-## Status: Phase 3 — the 3D office
+## Status: Phase 4 — polish + config
 
 Phase 1 ported the proven engine (`lib/qmr-engine/`); Phase 2 added the six-agent
-config, the orchestrator, and a sequential runner (`lib/agents/`). Phase 3 wraps
-all of that in a walk-around 3D office (React Three Fiber) with a flat-mode
-toggle. The engine is unchanged: nothing about grounding or the refuse rule moves.
+config, orchestrator, and sequential runner (`lib/agents/`); Phase 3 wrapped it in
+a walk-around 3D office. Phase 4 surfaces the rest of the workflow in that office
+and does a reduced-motion / performance pass. The engine is unchanged: nothing
+about grounding or the refuse rule moves.
 
 The 3D office (`components/office/`, `components/windows/`):
 
@@ -27,11 +28,26 @@ The 3D office (`components/office/`, `components/windows/`):
   desk dims). A records shelf on the back wall shows a tile per record, coloured
   by status (to fill / filled / flagged / final).
 - Clicking the dais, a desk, or a shelf tile opens the matching panel in an
-  OS-style draggable window over the canvas (DOM overlay, not 3D geometry):
-  orchestrator, agent brief, record editor, settings, criterion library.
+  OS-style draggable window over the canvas (DOM overlay, not 3D geometry).
 - Flat mode is always one click away (top-right toggle) and is the exact Phase
-  1/2 UI. The choice is remembered; reduced-motion users default to flat. The
-  3D bundle (three.js) is code-split, so flat mode never loads it.
+  1/2 UI. The choice is remembered; reduced-motion users default to flat, and in
+  3D reduced-motion disables control damping. The 3D bundle (three.js) is
+  code-split, so flat mode never loads it, and the canvas renders on demand
+  (only when something changes) rather than every frame.
+
+Phase 4 config windows, opened from the topbar:
+
+- **Configure agents:** add, remove, and edit agents (name, colour, scope,
+  behaviour, desk position, enabled, grounding brief). Adding one adds a desk;
+  removing one removes it. A custom agent picks a `kind` to reuse one of the five
+  specialist behaviours. Config persists in `db.agents`.
+- **Cycles:** switch, create (with carry-forward seeding from a prior cycle),
+  rename, delete. The topbar pill shows the active cycle.
+- **Filters:** two-level GD4 (main → sub), department, action status, review
+  state. The filtered set drives which tiles appear on the shelf.
+- **Sign-off:** review-state summary, the weakest points an auditor would
+  challenge, and a bulk finalise of everything already Under Review (still
+  blocked on blank or placeholder text).
 
 Engine (Phase 1):
 

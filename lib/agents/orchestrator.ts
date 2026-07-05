@@ -1,6 +1,9 @@
 import type { Agent } from "@/lib/qmr-engine";
-import { CANONICAL_ORDER } from "./config";
+import { CANONICAL_ORDER, kindOf } from "./config";
 import type { RunTarget } from "./types";
+
+const canonicalIndex = (a: Agent): number => (CANONICAL_ORDER as readonly string[]).indexOf(kindOf(a));
+const isRunnable = (a: Agent): boolean => (CANONICAL_ORDER as readonly string[]).includes(kindOf(a));
 
 /* =========================================================
    ORCHESTRATOR (deterministic planner, Phase 2)
@@ -11,10 +14,12 @@ import type { RunTarget } from "./types";
    here later without changing the run loop.
    ========================================================= */
 
-/** Enabled specialists (never the orchestrator itself), in canonical order. */
+/** Enabled, runnable specialists (never the orchestrator), in canonical order.
+    Custom agents are ordered by the canonical position of their kind. */
 export function enabledSpecialists(agents: Agent[]): Agent[] {
-  const byId = new Map(agents.map((a) => [a.id, a] as const));
-  return CANONICAL_ORDER.map((id) => byId.get(id)).filter((a): a is Agent => !!a && a.enabled);
+  return agents
+    .filter((a) => a.enabled && a.id !== "orchestrator" && isRunnable(a))
+    .sort((x, y) => canonicalIndex(x) - canonicalIndex(y));
 }
 
 /**
@@ -39,7 +44,7 @@ export function planRun(agents: Agent[], _target: RunTarget, instruction?: strin
   if (/consist|harmoni|voice|tone/.test(t)) wants.add("consistency");
   if (/final|sign.?off|approve/.test(t)) wants.add("signoff");
 
-  return wants.size ? full.filter((a) => wants.has(a.id)) : full;
+  return wants.size ? full.filter((a) => wants.has(kindOf(a))) : full;
 }
 
 export function planNarrative(plan: Agent[], target: RunTarget): string {
