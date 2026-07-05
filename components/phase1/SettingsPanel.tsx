@@ -37,6 +37,7 @@ export function SettingsPanel({
   const [erpToken, setErpToken] = useState(settings.erpToken || "");
   const [supabaseUrl, setSupabaseUrl] = useState(settings.supabaseUrl || "");
   const [supabaseKey, setSupabaseKey] = useState(settings.supabaseKey || "");
+  const [googleClientId, setGoogleClientId] = useState(settings.googleClientId || "");
 
   return (
     <div
@@ -140,6 +141,14 @@ export function SettingsPanel({
         </div>
       </div>
 
+      <div style={{ marginBottom: 12 }}>
+        <label style={labelStyle}>Google OAuth client id (Drive)</label>
+        <input style={inputStyle} value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} placeholder="xxxx.apps.googleusercontent.com" />
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>
+          Enables “Pull from Drive” in the criterion library (read-only Drive access).
+        </div>
+      </div>
+
       <button
         onClick={() =>
           onSave({
@@ -152,6 +161,7 @@ export function SettingsPanel({
             erpToken: erpToken.trim(),
             supabaseUrl: supabaseUrl.trim(),
             supabaseKey: supabaseKey.trim(),
+            googleClientId: googleClientId.trim(),
           })
         }
         style={{

@@ -92,6 +92,7 @@ export interface Settings {
   reviewer?: string;
   supabaseUrl?: string;
   supabaseKey?: string;
+  googleClientId?: string;
 }
 
 export interface Exemplars {

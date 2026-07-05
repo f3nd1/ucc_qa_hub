@@ -91,6 +91,13 @@ URL and anon key in Settings, run the migration SQL once, then Export → Save t
 via the REST endpoint. The granular tables in the migration remain for a future
 per-table adapter.
 
+Google Drive is wired (`lib/integrations/googleDrive.ts`): set a Google OAuth
+client id in Settings, then the criterion library can pull a procedure or
+requirement straight from a Drive link. It uses Google Identity Services for a
+read-only Drive token, exports Google Docs as text and downloads other files
+(docx/pdf) through the same extractText. Live OAuth needs a real Google client
+id; the link parsing and fetch flow are in place.
+
 The flat view reproduces the original UCC QMR Workbench: a records sidebar
 (two-level GD4 + department + status + review filters, bulk actions, per-record
 badges) and the full record editor (context grid, KPI actual/target/UOM/action
@@ -98,7 +105,7 @@ status, evaluation + improvement, quick-fill, evidence + note, both draft-model
 buttons, review row, per-activity and per-record checks). The 3D office and the
 agent office are a click away in the topbar.
 
-Stubbed until a later phase: Google Drive.
+Everything in the build spec is now wired.
 
 ## Run it
 

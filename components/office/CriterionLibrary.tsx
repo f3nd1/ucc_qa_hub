@@ -11,6 +11,7 @@ import {
   recordOrder,
 } from "@/lib/qmr-engine";
 import type { Notify } from "../useWorkbench";
+import { driveFetchText, parseDriveId, requestDriveToken } from "@/lib/integrations/googleDrive";
 
 const label: React.CSSProperties = { fontSize: 11, color: "var(--muted)", fontWeight: 600, display: "block", marginBottom: 2 };
 const input: React.CSSProperties = {
@@ -49,9 +50,35 @@ export function CriterionLibrary({
   const [proc, setProc] = useState("");
   const [drive, setDrive] = useState("");
   const [busy, setBusy] = useState<"" | "req" | "proc">("");
+  const [drive_, setDriveBusy] = useState<"" | "req" | "proc">("");
 
   const reqFile = useRef<HTMLInputElement>(null);
   const procFile = useRef<HTMLInputElement>(null);
+
+  async function onDrivePull(kind: "req" | "proc") {
+    const id = parseDriveId(drive);
+    if (!id) {
+      notify("Enter a valid Google Drive link above first.", "err");
+      return;
+    }
+    setDriveBusy(kind);
+    try {
+      const token = await requestDriveToken(db.settings.googleClientId || "");
+      const text = await driveFetchText(token, id);
+      if (!text) notify("No text found in the Drive file.", "err");
+      else if (kind === "req") {
+        setReq(text);
+        notify("Requirement text pulled from Drive.", "ok");
+      } else {
+        setProc(text);
+        notify("Procedure text pulled from Drive.", "ok");
+      }
+    } catch (e) {
+      notify("Drive pull failed: " + (e as Error).message, "err");
+    } finally {
+      setDriveBusy("");
+    }
+  }
 
   // Load the selected criterion's grounding when the selection changes.
   useEffect(() => {
@@ -151,8 +178,19 @@ export function CriterionLibrary({
       </div>
 
       <div style={{ marginBottom: 12 }}>
-        <label style={label}>Google Drive link (reference only)</label>
+        <label style={label}>Google Drive link</label>
         <input style={input} value={drive} onChange={(e) => setDrive(e.target.value)} placeholder="https://drive.google.com/…" />
+        <div style={{ display: "flex", gap: 6, marginTop: 5, alignItems: "center", flexWrap: "wrap" }}>
+          <button style={upBtn} onClick={() => onDrivePull("req")} disabled={drive_ === "req"}>
+            {drive_ === "req" ? "Pulling…" : "Pull → requirement"}
+          </button>
+          <button style={upBtn} onClick={() => onDrivePull("proc")} disabled={drive_ === "proc"}>
+            {drive_ === "proc" ? "Pulling…" : "Pull → procedure"}
+          </button>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+            Needs a Google client id in Settings; grants read-only Drive access.
+          </span>
+        </div>
       </div>
 
       <button
