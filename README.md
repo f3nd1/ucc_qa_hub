@@ -13,12 +13,25 @@ in (priority order) the GD4 requirement, the UCC procedure, the evidence, and
 the user's note. If a claim cannot be grounded, the tool refuses and asks a
 precise question rather than inventing a plausible sentence.
 
-## Status: Phase 2 — agent layer (flat UI)
+## Status: Phase 3 — the 3D office
 
-Phase 1 ported the proven engine from the single-file tool
-(`qmr-workbench.html`) into a framework-agnostic TypeScript module
-(`lib/qmr-engine/`). Phase 2 adds the six-agent config, the orchestrator, and a
-sequential runner, still in a flat 2D UI. No 3D yet (that is Phase 3).
+Phase 1 ported the proven engine (`lib/qmr-engine/`); Phase 2 added the six-agent
+config, the orchestrator, and a sequential runner (`lib/agents/`). Phase 3 wraps
+all of that in a walk-around 3D office (React Three Fiber) with a flat-mode
+toggle. The engine is unchanged: nothing about grounding or the refuse rule moves.
+
+The 3D office (`components/office/`, `components/windows/`):
+
+- A room you orbit, pan and zoom. Orchestrator dais in the centre; one desk per
+  agent around it, each with a light in the agent's colour (a disabled agent's
+  desk dims). A records shelf on the back wall shows a tile per record, coloured
+  by status (to fill / filled / flagged / final).
+- Clicking the dais, a desk, or a shelf tile opens the matching panel in an
+  OS-style draggable window over the canvas (DOM overlay, not 3D geometry):
+  orchestrator, agent brief, record editor, settings, criterion library.
+- Flat mode is always one click away (top-right toggle) and is the exact Phase
+  1/2 UI. The choice is remembered; reduced-motion users default to flat. The
+  3D bundle (three.js) is code-split, so flat mode never loads it.
 
 Engine (Phase 1):
 
@@ -54,6 +67,10 @@ pnpm dev
 # open http://localhost:3000
 ```
 
+It opens into the **3D office**. Drag to orbit, scroll to zoom, and click the
+centre dais, a desk, or a shelf tile to open its panel in a draggable window.
+Use **Flat mode** (top-right) for the plain 2D UI at any time.
+
 ### Prove Phase 1 with no API key
 
 1. Press **Load demo** — three records appear (250017 blank to draft, 250006 with
@@ -87,6 +104,9 @@ or run the orchestrator so the Drafter and Consistency Reviewer call the model.
 
 ```
 app/                     routes, layout
+components/AppShell       top-level: 3D / flat mode + shared toast
+components/office/        the 3D office: scene, dais, desks, shelf, panels
+components/windows/       draggable window
 components/phase1/        flat records editor + shell (tabs live here)
 components/phase2/        agent office: orchestrator, roster, run steps
 lib/qmr-engine/           ported engine: data model, grounding, checks, ai, io

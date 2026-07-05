@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { store, useDb } from "@/lib/store/store";
 import {
   activeCycle,
@@ -23,28 +23,17 @@ import { SettingsPanel } from "./SettingsPanel";
 import { download } from "./download";
 import { rowKey } from "@/lib/qmr-engine";
 import { AgentOffice } from "../phase2/AgentOffice";
+import type { Notify } from "../useWorkbench";
 
-type ToastKind = "ok" | "err" | "info";
-
-export function DemoWorkbench() {
+/**
+ * Flat view (Records + Agent office tabs). The proven Phase 1/2 UI, now one
+ * of two shells. The toast and store hydration are owned by AppShell.
+ */
+export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode?: () => void }) {
   const db = useDb();
   const [busyName, setBusyName] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [tab, setTab] = useState<"records" | "agents">("records");
-  const [toast, setToast] = useState<{ text: string; kind: ToastKind } | null>(null);
-
-  useEffect(() => {
-    store.hydrate();
-  }, []);
-
-  const notify = useCallback((text: string, kind: ToastKind = "info") => {
-    setToast({ text, kind });
-    window.clearTimeout((notify as unknown as { _h?: number })._h);
-    (notify as unknown as { _h?: number })._h = window.setTimeout(
-      () => setToast(null),
-      kind === "err" ? 6000 : 3600,
-    );
-  }, []);
 
   const order = recordOrder(db);
   const cycleName = activeCycle(db)?.name || "none";
@@ -162,6 +151,11 @@ export function DemoWorkbench() {
           ))}
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {onSetMode && (
+            <button style={{ ...tbBtn, background: "rgba(255,255,255,.22)" }} onClick={onSetMode}>
+              3D office
+            </button>
+          )}
           <button style={tbBtn} onClick={onLoadDemo}>
             Load demo
           </button>
@@ -229,27 +223,6 @@ export function DemoWorkbench() {
           ))
         )}
       </div>
-
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 18,
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: toast.kind === "err" ? "var(--err)" : toast.kind === "ok" ? "var(--ok)" : "var(--navy)",
-            color: "#fff",
-            borderRadius: 6,
-            padding: "9px 16px",
-            fontSize: 12.5,
-            maxWidth: "80vw",
-            boxShadow: "0 4px 14px rgba(0,0,0,.3)",
-            zIndex: 200,
-          }}
-        >
-          {toast.text}
-        </div>
-      )}
     </div>
   );
 }
