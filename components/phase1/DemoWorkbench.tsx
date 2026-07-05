@@ -22,6 +22,7 @@ import { RecordCard } from "./RecordCard";
 import { SettingsPanel } from "./SettingsPanel";
 import { download } from "./download";
 import { rowKey } from "@/lib/qmr-engine";
+import { AgentOffice } from "../phase2/AgentOffice";
 
 type ToastKind = "ok" | "err" | "info";
 
@@ -29,6 +30,7 @@ export function DemoWorkbench() {
   const db = useDb();
   const [busyName, setBusyName] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [tab, setTab] = useState<"records" | "agents">("records");
   const [toast, setToast] = useState<{ text: string; kind: ToastKind } | null>(null);
 
   useEffect(() => {
@@ -138,7 +140,27 @@ export function DemoWorkbench() {
         >
           Cycle: <b>{cycleName}</b>
         </span>
-        <span style={{ fontSize: 11.5, opacity: 0.75 }}>Phase 1 · ported engine</span>
+        <span style={{ fontSize: 11.5, opacity: 0.75 }}>Phase 2 · agent office</span>
+        <div style={{ display: "flex", gap: 4, marginLeft: 8 }}>
+          {(["records", "agents"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                background: tab === t ? "#fff" : "rgba(255,255,255,.12)",
+                color: tab === t ? "var(--navy)" : "#fff",
+                border: "1px solid rgba(255,255,255,.32)",
+                borderRadius: 4,
+                padding: "5px 10px",
+                fontSize: 12,
+                fontWeight: tab === t ? 600 : 400,
+                cursor: "pointer",
+              }}
+            >
+              {t === "records" ? "Records" : "Agent office"}
+            </button>
+          ))}
+        </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={tbBtn} onClick={onLoadDemo}>
             Load demo
@@ -166,7 +188,9 @@ export function DemoWorkbench() {
           <SettingsPanel settings={db.settings} onSave={onSaveSettings} onClose={() => setShowSettings(false)} />
         )}
 
-        {order.length === 0 ? (
+        {tab === "agents" ? (
+          <AgentOffice />
+        ) : order.length === 0 ? (
           <div
             style={{
               border: "1px dashed var(--border)",

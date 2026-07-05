@@ -98,6 +98,23 @@ export interface Exemplars {
   short: string;
 }
 
+/**
+ * A configurable specialist (or the orchestrator). Pure serialisable data:
+ * it travels in the project file. All agent behaviour lives in lib/agents;
+ * the engine only stores the config so it persists and syncs.
+ */
+export type AgentScope = "activity" | "record" | "cycle";
+export interface Agent {
+  id: string;
+  name: string;
+  role: string; // short description shown at the desk
+  systemPrompt: string; // grounding + behaviour
+  color: string; // desk light colour in the 3D scene
+  deskPosition: [number, number, number];
+  enabled: boolean;
+  scope: AgentScope; // what it operates on
+}
+
 export interface Db {
   settings: Settings;
   procedures: Record<string, string>; // criterion -> SOP text (shared across cycles)
@@ -107,6 +124,7 @@ export interface Db {
   activeCycle: string | null;
   cycles: Record<string, Cycle>;
   noteBank: Record<string, string>; // activityKey -> reusable note (shared)
+  agents: Agent[]; // agent config (empty = use defaults from lib/agents)
 }
 
 /** A single check finding for the check rail. */

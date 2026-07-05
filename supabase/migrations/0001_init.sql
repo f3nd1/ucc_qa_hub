@@ -55,6 +55,17 @@ create table if not exists qmr_note_bank (
   activity_key text primary key,
   note text
 );
+create table if not exists qmr_agents (
+  id text primary key,
+  name text not null,
+  role text,
+  system_prompt text,
+  color text,
+  desk_position jsonb,
+  enabled boolean default true,
+  scope text default 'record',
+  updated_at timestamptz default now()
+);
 -- Adjust RLS to your needs. For a single-user tool matching the
 -- Marketing OS open-policy pattern, you may enable RLS with a permissive policy.
 alter table qmr_procedures enable row level security;
@@ -62,3 +73,4 @@ alter table qmr_cycles enable row level security;
 alter table qmr_records enable row level security;
 alter table qmr_items enable row level security;
 alter table qmr_note_bank enable row level security;
+alter table qmr_agents enable row level security;

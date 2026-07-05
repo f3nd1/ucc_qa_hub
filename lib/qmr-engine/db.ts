@@ -14,6 +14,7 @@ export function emptyDb(): Db {
     activeCycle: null,
     cycles: {},
     noteBank: {},
+    agents: [],
   };
 }
 
@@ -30,6 +31,7 @@ export function normalizeDb(raw: unknown): Db {
   if (!db.exemplars) db.exemplars = { met: "", nil: "", short: "" };
   if (!db.cycles) db.cycles = {};
   if (!db.noteBank) db.noteBank = {};
+  if (!db.agents) db.agents = [];
   if (db.activeCycle === undefined) db.activeCycle = null;
   return db;
 }
