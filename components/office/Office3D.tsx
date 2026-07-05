@@ -11,7 +11,7 @@ import type { Notify } from "../useWorkbench";
 import { Scene } from "./Scene";
 import { Window } from "../windows/Window";
 import { AgentOffice } from "../phase2/AgentOffice";
-import { RecordCard } from "../phase1/RecordCard";
+import { RecordView } from "../flat/RecordView";
 import { SettingsPanel } from "../phase1/SettingsPanel";
 import { AgentPanel } from "./AgentPanel";
 import { CriterionLibrary } from "./CriterionLibrary";
@@ -124,11 +124,11 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
     focus("record");
   }
 
-  async function onDraft(parent: string, name: string) {
+  async function onDraft(parent: string, name: string, final: boolean) {
     const key = rowKey(parent, name);
     setBusyName(key);
     try {
-      await draft(parent, name);
+      await draft(parent, name, final);
     } finally {
       setBusyName(null);
     }
@@ -204,15 +204,20 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
         const rec = records(db)[selectedRecord];
         if (!rec) return <div style={{ fontSize: 12.5, color: "var(--muted)" }}>No record selected.</div>;
         return (
-          <RecordCard
+          <RecordView
             db={db}
             record={rec}
             busyName={busyName}
-            onDraft={(name) => onDraft(rec.name, name)}
+            onDraft={(name, final) => onDraft(rec.name, name, final)}
             onPatch={(name, p) => patch(rec.name, name, p)}
+            onNote={(name, value) => wb.setNote(rec.name, name, value)}
+            onQuick={(name, mode) => wb.quickFill(rec.name, name, mode)}
             onReview={(name, state) => review(rec.name, name, state)}
-            onClearProc={clearProc}
-            onRestoreProc={restoreProc}
+            onCarry={(name) => wb.useCarry(rec.name, name)}
+            onDraftEmpties={() => wb.draftRecordEmpties(rec.name)}
+            onHarmonise={() => wb.harmonise(rec.name)}
+            onFinaliseRecord={() => wb.finaliseRecordNow(rec.name)}
+            onEditCriterion={() => openWin({ id: "library", kind: "library" })}
           />
         );
       }
@@ -230,7 +235,8 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
     return undefined;
   }
   function winWidth(w: WinItem): number {
-    if (w.kind === "record" || w.kind === "signoff") return 560;
+    if (w.kind === "record") return 720;
+    if (w.kind === "signoff") return 560;
     if (w.kind === "orchestrator" || w.kind === "agents-config" || w.kind === "filters") return 620;
     return 460;
   }

@@ -21,6 +21,7 @@ export * from "./prompts";
 export * from "./ai";
 export * from "./review";
 export * from "./edit";
+export * from "./quickfill";
 export * from "./cycles";
 export * from "./csv";
 export * from "./io";

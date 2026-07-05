@@ -66,6 +66,12 @@ create table if not exists qmr_agents (
   scope text default 'record',
   updated_at timestamptz default now()
 );
+-- Whole-project sync blob (matches the local single-blob model).
+create table if not exists qmr_project (
+  id text primary key,
+  data jsonb,
+  updated_at timestamptz default now()
+);
 -- Adjust RLS to your needs. For a single-user tool matching the
 -- Marketing OS open-policy pattern, you may enable RLS with a permissive policy.
 alter table qmr_procedures enable row level security;
@@ -74,3 +80,4 @@ alter table qmr_records enable row level security;
 alter table qmr_items enable row level security;
 alter table qmr_note_bank enable row level security;
 alter table qmr_agents enable row level security;
+alter table qmr_project enable row level security;

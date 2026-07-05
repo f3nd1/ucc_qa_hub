@@ -35,6 +35,8 @@ export function SettingsPanel({
   const [reviewer, setReviewer] = useState(settings.reviewer || "");
   const [erpUrl, setErpUrl] = useState(settings.erpUrl || "");
   const [erpToken, setErpToken] = useState(settings.erpToken || "");
+  const [supabaseUrl, setSupabaseUrl] = useState(settings.supabaseUrl || "");
+  const [supabaseKey, setSupabaseKey] = useState(settings.supabaseKey || "");
 
   return (
     <div
@@ -119,6 +121,25 @@ export function SettingsPanel({
         </div>
       </div>
 
+      <div style={{ marginBottom: 10 }}>
+        <label style={labelStyle}>Supabase project URL</label>
+        <input style={inputStyle} value={supabaseUrl} onChange={(e) => setSupabaseUrl(e.target.value)} placeholder="https://xxxx.supabase.co" />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={labelStyle}>Supabase anon key</label>
+        <input
+          style={inputStyle}
+          type="password"
+          value={supabaseKey}
+          onChange={(e) => setSupabaseKey(e.target.value)}
+          placeholder="eyJhbGciOi…"
+        />
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>
+          Run the migration SQL first (Export menu). Sync stores the whole project as one row in{" "}
+          <span style={{ fontFamily: "var(--mono)" }}>qmr_project</span>.
+        </div>
+      </div>
+
       <button
         onClick={() =>
           onSave({
@@ -129,6 +150,8 @@ export function SettingsPanel({
             reviewer: reviewer.trim(),
             erpUrl: erpUrl.trim(),
             erpToken: erpToken.trim(),
+            supabaseUrl: supabaseUrl.trim(),
+            supabaseKey: supabaseKey.trim(),
           })
         }
         style={{

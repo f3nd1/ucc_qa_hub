@@ -90,6 +90,8 @@ export interface Settings {
   erpUrl?: string;
   erpToken?: string;
   reviewer?: string;
+  supabaseUrl?: string;
+  supabaseKey?: string;
 }
 
 export interface Exemplars {

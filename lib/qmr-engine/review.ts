@@ -62,6 +62,31 @@ export interface BulkFinaliseResult {
   message: string;
 }
 
+/** Promote one record's "Under Review" items that pass the gate to Final. */
+export function finaliseRecord(db: Db, parent: string, today: string = todayISO()): BulkFinaliseResult {
+  const rec0 = records(db)[parent];
+  if (!rec0) return { db, done: 0, blocked: 0, message: "Record not found." };
+  const d = clone(db);
+  const reviewer = getS(d).reviewer || "";
+  let done = 0,
+    blocked = 0;
+  records(d)[parent].items.forEach((it) => {
+    if (it.review_state === "Under Review") {
+      if (
+        String(it.evaluation_text || "").trim() &&
+        String(it.improvement_action || "").trim() &&
+        !hasPlaceholder(it.evaluation_text, it.improvement_action)
+      ) {
+        it.review_state = "Final";
+        it.reviewed_by = reviewer;
+        it.reviewed_on = today;
+        done++;
+      } else blocked++;
+    }
+  });
+  return { db: d, done, blocked, message: "Finalised " + done + (blocked ? ", " + blocked + " blocked." : ".") };
+}
+
 /** Promote every "Under Review" item that passes the finalise gate to Final. */
 export function bulkFinalise(db: Db, today: string = todayISO()): BulkFinaliseResult {
   const d = clone(db);

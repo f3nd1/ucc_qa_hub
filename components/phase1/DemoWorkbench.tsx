@@ -1,239 +1,312 @@
 "use client";
 
-import { useState } from "react";
-import { store, useDb } from "@/lib/store/store";
-import {
-  activeCycle,
-  aiDraft,
-  exportFlat,
-  exportImportCSV,
-  exportProject,
-  loadDemo,
-  MIGRATION_SQL,
-  recordOrder,
-  records,
-  setProcedure,
-  setReview,
-  updateItem,
-  DEMO_PROC,
-} from "@/lib/qmr-engine";
-import type { Item, ReviewState, Settings } from "@/lib/qmr-engine";
-import { RecordCard } from "./RecordCard";
-import { SettingsPanel } from "./SettingsPanel";
-import { download } from "./download";
+import { useEffect, useRef, useState } from "react";
+import { activeCycle, emptyFilter, recordOrder, records } from "@/lib/qmr-engine";
+import type { Filter } from "@/lib/qmr-engine";
 import { rowKey } from "@/lib/qmr-engine";
-import { AgentOffice } from "../phase2/AgentOffice";
+import { useWorkbench } from "../useWorkbench";
 import type { Notify } from "../useWorkbench";
+import { Sidebar } from "../flat/Sidebar";
+import { RecordView } from "../flat/RecordView";
+import { Modal } from "../flat/Modal";
+import { SettingsPanel } from "./SettingsPanel";
+import { CycleManager } from "../office/CycleManager";
+import { CriterionLibrary } from "../office/CriterionLibrary";
+import { ErpNextPanel } from "../office/ErpNextPanel";
+import { AgentOffice } from "../phase2/AgentOffice";
+
+type ModalKind = "cycles" | "library" | "import" | "settings" | "agents" | "erpnext" | null;
 
 /**
- * Flat view (Records + Agent office tabs). The proven Phase 1/2 UI, now one
- * of two shells. The toast and store hydration are owned by AppShell.
+ * Flat view — a faithful reproduction of the original UCC QMR Workbench:
+ * records sidebar (filters, bulk actions, badges) plus the full record editor.
+ * One of two shells; the 3D office is a click away.
  */
 export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode?: () => void }) {
-  const db = useDb();
-  const [busyName, setBusyName] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
-  const [tab, setTab] = useState<"records" | "agents">("records");
-
+  const wb = useWorkbench(notify);
+  const db = wb.db;
   const order = recordOrder(db);
-  const cycleName = activeCycle(db)?.name || "none";
 
-  /* ---- handlers ---- */
+  const [selected, setSelected] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>(emptyFilter());
+  const [busyName, setBusyName] = useState<string | null>(null);
+  const [modal, setModal] = useState<ModalKind>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [critPre, setCritPre] = useState<string | undefined>(undefined);
+  const csvInput = useRef<HTMLInputElement>(null);
+  const projInput = useRef<HTMLInputElement>(null);
 
-  function onLoadDemo() {
-    store.set(loadDemo(db));
-    notify("Demo loaded: 3 records, procedures + GD4 requirements, exemplars.", "ok");
-  }
+  useEffect(() => {
+    if (order.length && (!selected || !order.includes(selected))) setSelected(order[0]);
+    if (!order.length && selected) setSelected(null);
+  }, [order, selected]);
 
-  function onSaveSettings(patch: Settings) {
-    store.set({ ...db, settings: { ...db.settings, ...patch } });
-    setShowSettings(false);
-    notify("Settings saved.", "ok");
-  }
+  useEffect(() => {
+    if (!exportOpen) return;
+    const h = () => setExportOpen(false);
+    document.addEventListener("click", h);
+    return () => document.removeEventListener("click", h);
+  }, [exportOpen]);
 
-  function onClearProc(criterion: string) {
-    store.set(setProcedure(db, criterion, ""));
-    notify("Procedure cleared for " + criterion + " — drafting will now refuse.", "err");
-  }
-
-  function onRestoreProc(criterion: string) {
-    store.set(setProcedure(db, criterion, DEMO_PROC[criterion] || ""));
-    notify("Procedure restored for " + criterion + ".", "ok");
-  }
-
-  async function onDraft(parent: string, childName: string) {
-    const key = rowKey(parent, childName);
+  async function onDraft(parent: string, name: string, final: boolean) {
+    const key = rowKey(parent, name);
     setBusyName(key);
     try {
-      const r = await aiDraft(db, parent, childName);
-      store.set(r.db);
-      notify(r.message, r.status === "drafted" ? "ok" : r.status === "error" ? "err" : "info");
+      await wb.draft(parent, name, final);
     } finally {
       setBusyName(null);
     }
   }
 
-  function onPatch(parent: string, childName: string, patch: Partial<Item>) {
-    store.set(updateItem(db, parent, childName, patch));
+  function exp(kind: string) {
+    setExportOpen(false);
+    if (kind === "flat") wb.exportFile("flat");
+    else if (kind === "import") wb.exportFile("import");
+    else if (kind === "project") wb.exportFile("project");
+    else if (kind === "migration") wb.exportFile("migration");
+    else if (kind === "loadproject") projInput.current?.click();
+    else if (kind === "writeback") setModal("erpnext");
+    else if (kind === "supabase-push") wb.supabasePush();
+    else if (kind === "supabase-pull") wb.supabasePull();
   }
 
-  function onReview(parent: string, childName: string, state: ReviewState) {
-    const r = setReview(db, parent, childName, state);
-    store.set(r.db);
-    notify(r.message, r.status === "blocked" ? "err" : "ok");
-  }
-
-  function onExport(kind: "flat" | "import" | "project" | "migration") {
-    if (kind === "migration") {
-      download("qmr_supabase_migration.sql", MIGRATION_SQL, "sql");
-      notify("Migration SQL downloaded.", "ok");
-      return;
-    }
-    const res =
-      kind === "flat" ? exportFlat(db) : kind === "import" ? exportImportCSV(db) : exportProject(db);
-    if (res.error) {
-      notify(res.error, "err");
-      return;
-    }
-    if (res.file) {
-      download(res.file.filename, res.file.text, res.file.mime);
-      notify(res.file.filename + " downloaded.", "ok");
-    }
-  }
+  const rec = selected ? records(db)[selected] : null;
+  const cyc = activeCycle(db);
 
   return (
     <div>
-      {/* topbar */}
-      <div
-        style={{
-          background: "var(--navy)",
-          color: "#fff",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "9px 14px",
-          flexWrap: "wrap",
-        }}
-      >
-        <h1 style={{ fontSize: 15, margin: 0, fontWeight: 600, letterSpacing: 0.3 }}>
-          QMR Agent Office
-        </h1>
-        <span
-          style={{
-            background: "rgba(255,255,255,.14)",
-            border: "1px solid rgba(255,255,255,.3)",
-            borderRadius: 14,
-            padding: "3px 12px",
-            fontSize: 12,
+      <div className="topbar">
+        <h1>UCC QMR Workbench</h1>
+        <button className="cycle-pill" onClick={() => setModal("cycles")}>
+          <span>Cycle:</span> <b>{cyc?.name || "none"}</b> <span style={{ opacity: 0.7 }}>▾</span>
+        </button>
+        <div className="tb-spacer" />
+        {onSetMode && (
+          <button className="tb-btn" onClick={onSetMode}>
+            3D office
+          </button>
+        )}
+        <button className="tb-btn" onClick={wb.loadDemoNow}>
+          Load demo
+        </button>
+        <button className="tb-btn" onClick={() => setModal("agents")}>
+          Agent office
+        </button>
+        <button className="tb-btn" onClick={() => { setCritPre(undefined); setModal("library"); }}>
+          Criterion library
+        </button>
+        <button
+          className="tb-btn"
+          onClick={() => {
+            if (!cyc) {
+              notify("Create a cycle first.", "err");
+              setModal("cycles");
+              return;
+            }
+            setModal("import");
           }}
         >
-          Cycle: <b>{cycleName}</b>
-        </span>
-        <span style={{ fontSize: 11.5, opacity: 0.75 }}>Phase 2 · agent office</span>
-        <div style={{ display: "flex", gap: 4, marginLeft: 8 }}>
-          {(["records", "agents"] as const).map((t) => (
+          Import records
+        </button>
+        <div className="tb-menu-wrap" onClick={(e) => e.stopPropagation()}>
+          <button className="tb-btn" onClick={() => setExportOpen((v) => !v)}>
+            Export ▾
+          </button>
+          <div className={"tb-menu" + (exportOpen ? " open" : "")}>
+            <div className="grp">Data out</div>
+            <button onClick={() => exp("flat")}>Flat CSV (review)</button>
+            <button onClick={() => exp("import")}>ERPNext Data Import CSV</button>
+            <button onClick={() => exp("writeback")}>Write back to ERPNext (API)</button>
+            <div className="grp">Whole project</div>
+            <button onClick={() => exp("project")}>Save project file (.json)</button>
+            <button onClick={() => exp("loadproject")}>Open project file</button>
+            <div className="grp">Supabase (Codespace)</div>
+            <button onClick={() => exp("supabase-push")}>Save to Supabase</button>
+            <button onClick={() => exp("supabase-pull")}>Load from Supabase</button>
+            <button onClick={() => exp("migration")}>Download migration SQL</button>
+          </div>
+        </div>
+        <button className="tb-btn primary" onClick={() => setModal("settings")}>
+          Settings
+        </button>
+      </div>
+
+      <div className="layout">
+        <Sidebar
+          db={db}
+          filter={filter}
+          onFilter={setFilter}
+          selected={selected}
+          onSelect={setSelected}
+          onDraftAll={wb.draftAllEmpties}
+          onCarryForward={wb.carryForwardNow}
+          onFinaliseAll={wb.bulkFinaliseNow}
+        />
+        <div className="main">
+          {rec ? (
+            <RecordView
+              db={db}
+              record={rec}
+              busyName={busyName}
+              onDraft={(name, final) => onDraft(selected!, name, final)}
+              onPatch={(name, patch) => wb.patch(selected!, name, patch)}
+              onNote={(name, value) => wb.setNote(selected!, name, value)}
+              onQuick={(name, mode) => wb.quickFill(selected!, name, mode)}
+              onReview={(name, state) => wb.review(selected!, name, state)}
+              onCarry={(name) => wb.useCarry(selected!, name)}
+              onDraftEmpties={() => wb.draftRecordEmpties(selected!)}
+              onHarmonise={() => wb.harmonise(selected!)}
+              onFinaliseRecord={() => wb.finaliseRecordNow(selected!)}
+              onEditCriterion={(c) => {
+                setCritPre(c || undefined);
+                setModal("library");
+              }}
+            />
+          ) : (
+            <div className="empty">
+              {!cyc ? (
+                <>
+                  <div style={{ fontSize: 15 }}>
+                    <b>Create a monitoring cycle to begin.</b>
+                  </div>
+                  <div className="steps">
+                    A cycle is one monitoring period (for example 2025 H1). Click the <b>Cycle</b> pill at the top
+                    left to create one, then <b>Import records</b> to load the Quality Monitoring Records. Set up
+                    your <b>Criterion library</b> once and it applies to every cycle.
+                  </div>
+                  <div style={{ marginTop: 18 }}>
+                    <button className="ai-btn" onClick={wb.loadDemoNow}>
+                      Quick start with demo
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 15 }}>
+                    <b>No records in “{cyc.name}” yet.</b>
+                  </div>
+                  <div className="steps">
+                    <b>Import records</b> from a CSV export or straight from ERPNext. Or <b>Load demo</b> to try the
+                    workflow.
+                  </div>
+                  <div style={{ marginTop: 18 }}>
+                    <button className="ai-btn" onClick={wb.loadDemoNow}>
+                      Load demo records
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {modal === "cycles" && (
+        <Modal title="Monitoring cycles" onClose={() => setModal(null)}>
+          <CycleManager
+            db={db}
+            onCreate={wb.createCycleNow}
+            onSwitch={(id) => {
+              wb.switchCycleNow(id);
+              setSelected(null);
+            }}
+            onRename={wb.renameCycleNow}
+            onDelete={(id) => {
+              wb.deleteCycleNow(id);
+              setSelected(null);
+            }}
+          />
+        </Modal>
+      )}
+      {modal === "library" && (
+        <Modal title="Criterion library — GD4 requirement + procedure per criterion" wide onClose={() => setModal(null)}>
+          <CriterionLibrary db={db} onSave={wb.saveCriterion} onClearProc={wb.clearProc} onRestoreProc={wb.restoreProc} notify={notify} initialCriterion={critPre} />
+        </Modal>
+      )}
+      {modal === "settings" && (
+        <Modal title="Settings" onClose={() => setModal(null)}>
+          <SettingsPanel
+            settings={db.settings}
+            onSave={(p) => {
+              wb.saveSettings(p);
+              setModal(null);
+            }}
+            onClose={() => setModal(null)}
+          />
+        </Modal>
+      )}
+      {modal === "agents" && (
+        <Modal title="Agent office" wide onClose={() => setModal(null)}>
+          <AgentOffice />
+        </Modal>
+      )}
+      {modal === "erpnext" && (
+        <Modal title="ERPNext" onClose={() => setModal(null)}>
+          <ErpNextPanel db={db} notify={notify} onImport={wb.erpImport} onWriteBack={wb.erpWriteBack} />
+        </Modal>
+      )}
+      {modal === "import" && (
+        <Modal title={"Import records into " + (cyc?.name || "")} onClose={() => setModal(null)}>
+          <div style={{ fontSize: 12.5 }}>
+            <h4 style={{ color: "var(--navy)", margin: "0 0 6px" }}>From CSV</h4>
+            <div className="hint" style={{ marginBottom: 8 }}>
+              ERPNext report export of Quality Monitoring Record Item with Parent, ID and the KPI columns.
+            </div>
+            <button className="act-btn" onClick={() => csvInput.current?.click()}>
+              Choose CSV file
+            </button>
+            <h4 style={{ color: "var(--navy)", margin: "16px 0 6px" }}>From ERPNext API</h4>
+            <div className="hint" style={{ marginBottom: 8 }}>Requires URL + token in Settings.</div>
+            <button className="act-btn" onClick={() => setModal("erpnext")}>
+              Pick from ERPNext
+            </button>
+            <h4 style={{ color: "var(--navy)", margin: "16px 0 6px" }}>Demo</h4>
             <button
-              key={t}
-              onClick={() => setTab(t)}
-              style={{
-                background: tab === t ? "#fff" : "rgba(255,255,255,.12)",
-                color: tab === t ? "var(--navy)" : "#fff",
-                border: "1px solid rgba(255,255,255,.32)",
-                borderRadius: 4,
-                padding: "5px 10px",
-                fontSize: 12,
-                fontWeight: tab === t ? 600 : 400,
-                cursor: "pointer",
+              className="act-btn"
+              onClick={() => {
+                wb.loadDemoNow();
+                setModal(null);
               }}
             >
-              {t === "records" ? "Records" : "Agent office"}
+              Load demo records
             </button>
-          ))}
-        </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {onSetMode && (
-            <button style={{ ...tbBtn, background: "rgba(255,255,255,.22)" }} onClick={onSetMode}>
-              3D office
-            </button>
-          )}
-          <button style={tbBtn} onClick={onLoadDemo}>
-            Load demo
-          </button>
-          <button style={tbBtn} onClick={() => onExport("flat")}>
-            Export flat CSV
-          </button>
-          <button style={tbBtn} onClick={() => onExport("import")}>
-            Data Import CSV
-          </button>
-          <button style={tbBtn} onClick={() => onExport("project")}>
-            Save project
-          </button>
-          <button style={tbBtn} onClick={() => onExport("migration")}>
-            Migration SQL
-          </button>
-          <button style={{ ...tbBtn, background: "#fff", color: "var(--navy)", fontWeight: 600 }} onClick={() => setShowSettings((s) => !s)}>
-            Settings
-          </button>
-        </div>
-      </div>
-
-      <div style={{ padding: "16px 20px 70px", maxWidth: 1120 }}>
-        {showSettings && (
-          <SettingsPanel settings={db.settings} onSave={onSaveSettings} onClose={() => setShowSettings(false)} />
-        )}
-
-        {tab === "agents" ? (
-          <AgentOffice />
-        ) : order.length === 0 ? (
-          <div
-            style={{
-              border: "1px dashed var(--border)",
-              borderRadius: 8,
-              background: "#fafbfd",
-              padding: 30,
-              textAlign: "center",
-              color: "var(--muted)",
-              marginTop: 24,
-            }}
-          >
-            <p style={{ marginTop: 0 }}>
-              <b style={{ color: "var(--navy)" }}>Phase 1 proving page.</b> Press <b>Load demo</b> to bring in
-              three records.
-            </p>
-            <div style={{ textAlign: "left", maxWidth: 640, margin: "12px auto 0", lineHeight: 1.7 }}>
-              To see the <b>refuse rule</b> with no API key: load the demo, then on any record press{" "}
-              <b>Clear procedure</b> and <b>Draft this activity</b>. The draft is blocked with a precise
-              question, and no network call is made. Add an OpenAI key in Settings to run a real grounded
-              draft.
-            </div>
           </div>
-        ) : (
-          order.map((p) => (
-            <RecordCard
-              key={p}
-              db={db}
-              record={records(db)[p]}
-              busyName={busyName}
-              onDraft={(name) => onDraft(p, name)}
-              onPatch={(name, patch) => onPatch(p, name, patch)}
-              onReview={(name, state) => onReview(p, name, state)}
-              onClearProc={onClearProc}
-              onRestoreProc={onRestoreProc}
-            />
-          ))
-        )}
-      </div>
+        </Modal>
+      )}
+
+      <input
+        ref={csvInput}
+        type="file"
+        accept=".csv,text/csv"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) {
+            const r = new FileReader();
+            r.onload = () => {
+              wb.importCSVNow(String(r.result));
+              setModal(null);
+            };
+            r.readAsText(f, "utf-8");
+          }
+          e.currentTarget.value = "";
+        }}
+      />
+      <input
+        ref={projInput}
+        type="file"
+        accept=".json,application/json"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) {
+            const r = new FileReader();
+            r.onload = () => wb.loadProjectNow(String(r.result));
+            r.readAsText(f, "utf-8");
+          }
+          e.currentTarget.value = "";
+        }}
+      />
     </div>
   );
 }
-
-const tbBtn: React.CSSProperties = {
-  background: "rgba(255,255,255,.12)",
-  color: "#fff",
-  border: "1px solid rgba(255,255,255,.32)",
-  borderRadius: 4,
-  padding: "5px 9px",
-  fontSize: 12,
-  whiteSpace: "nowrap",
-  cursor: "pointer",
-};

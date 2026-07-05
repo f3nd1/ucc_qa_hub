@@ -31,18 +31,20 @@ export function CriterionLibrary({
   onClearProc,
   onRestoreProc,
   notify,
+  initialCriterion,
 }: {
   db: Db;
   onSave: (criterion: string, requirement: string, procedure: string, drive: string) => void;
   onClearProc: (criterion: string) => void;
   onRestoreProc: (criterion: string) => void;
   notify: Notify;
+  initialCriterion?: string;
 }) {
   const existing = Array.from(new Set(recordOrder(db).map((p) => records(db)[p].criterion)))
     .filter(Boolean)
     .sort();
 
-  const [crit, setCrit] = useState<string>(existing[0] || "");
+  const [crit, setCrit] = useState<string>(initialCriterion || existing[0] || "");
   const [req, setReq] = useState("");
   const [proc, setProc] = useState("");
   const [drive, setDrive] = useState("");

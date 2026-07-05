@@ -85,7 +85,20 @@ the fresh document first and merges ONLY the KPI actual, evaluation, improvement
 action and action status onto matching rows by name; every other field and every
 unmatched row on the server is left untouched (per CLAUDE.md).
 
-Stubbed until a later phase: the Supabase adapter and Google Drive.
+Supabase sync is wired (`lib/store/supabaseSync.ts`): set the Supabase project
+URL and anon key in Settings, run the migration SQL once, then Export → Save to
+/ Load from Supabase stores the whole project as one jsonb row in `qmr_project`
+via the REST endpoint. The granular tables in the migration remain for a future
+per-table adapter.
+
+The flat view reproduces the original UCC QMR Workbench: a records sidebar
+(two-level GD4 + department + status + review filters, bulk actions, per-record
+badges) and the full record editor (context grid, KPI actual/target/UOM/action
+status, evaluation + improvement, quick-fill, evidence + note, both draft-model
+buttons, review row, per-activity and per-record checks). The 3D office and the
+agent office are a click away in the topbar.
+
+Stubbed until a later phase: Google Drive.
 
 ## Run it
 
