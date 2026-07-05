@@ -19,8 +19,19 @@ import { AgentEditor } from "./AgentEditor";
 import { CycleManager } from "./CycleManager";
 import { FiltersPanel } from "./FiltersPanel";
 import { SignOffPanel } from "./SignOffPanel";
+import { ErpNextPanel } from "./ErpNextPanel";
 
-type WinKind = "orchestrator" | "settings" | "library" | "record" | "agent" | "agents-config" | "cycles" | "filters" | "signoff";
+type WinKind =
+  | "orchestrator"
+  | "settings"
+  | "library"
+  | "record"
+  | "agent"
+  | "agents-config"
+  | "cycles"
+  | "filters"
+  | "signoff"
+  | "erpnext";
 interface WinItem {
   id: string;
   kind: WinKind;
@@ -42,6 +53,7 @@ const TITLES: Record<WinKind, string> = {
   cycles: "Monitoring cycles",
   filters: "Filters",
   signoff: "Sign-off",
+  erpnext: "ERPNext",
 };
 
 export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () => void }) {
@@ -175,6 +187,8 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
         );
       case "signoff":
         return <SignOffPanel db={db} onBulkFinalise={wb.bulkFinaliseNow} onOpenRecord={selectRecord} />;
+      case "erpnext":
+        return <ErpNextPanel db={db} notify={notify} onImport={wb.erpImport} onWriteBack={wb.erpWriteBack} />;
       case "agent": {
         const agent = agents.find((a) => a.id === w.agentId);
         if (!agent) return <div>Agent not found.</div>;
@@ -276,6 +290,9 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
           <button style={tbBtn} onClick={() => openWin({ id: "agents-config", kind: "agents-config" })}>
             Configure agents
           </button>
+          <button style={tbBtn} onClick={() => openWin({ id: "erpnext", kind: "erpnext" })}>
+            ERPNext
+          </button>
           <button style={tbBtn} onClick={() => exportFile("flat")}>
             Export CSV
           </button>
@@ -347,6 +364,7 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
                 y={p.y}
                 z={p.z}
                 width={winWidth(w)}
+                testId={"window-" + w.kind}
                 onClose={() => closeWin(w.id)}
                 onFocus={() => focus(w.id)}
                 onMove={(x, y) => move(w.id, x, y)}

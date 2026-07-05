@@ -21,6 +21,7 @@ import {
   switchCycle,
   updateItem,
 } from "@/lib/qmr-engine";
+import { erpConfig, fetchErpRecords, writeBackRecords } from "@/lib/qmr-engine";
 import type { Agent, Item, ReviewState, Settings } from "@/lib/qmr-engine";
 import { addAgent, removeAgent, toggleAgent, updateAgent } from "@/lib/agents";
 import { download } from "./phase1/download";
@@ -158,6 +159,29 @@ export function useWorkbench(notify: Notify) {
     notify(r.message, r.blocked ? "err" : "ok");
   }, [notify]);
 
+  const erpImport = useCallback(
+    async (names: string[]) => {
+      const st = store.getState();
+      const d = await fetchErpRecords(st, erpConfig(st), names);
+      store.set(d);
+      notify("Loaded " + names.length + " record(s) from ERPNext.", "ok");
+    },
+    [notify],
+  );
+
+  const erpWriteBack = useCallback(
+    async (parents: string[]) => {
+      const st = store.getState();
+      const r = await writeBackRecords(st, erpConfig(st), parents);
+      notify(
+        "Write-back: " + r.ok + " ok" + (r.failed.length ? ", " + r.failed.length + " failed" : "") + ".",
+        r.failed.length ? "err" : "ok",
+      );
+      return r;
+    },
+    [notify],
+  );
+
   const exportFile = useCallback(
     (kind: ExportKind) => {
       if (kind === "migration") {
@@ -198,6 +222,8 @@ export function useWorkbench(notify: Notify) {
     renameCycleNow,
     deleteCycleNow,
     bulkFinaliseNow,
+    erpImport,
+    erpWriteBack,
     exportFile,
   };
 }

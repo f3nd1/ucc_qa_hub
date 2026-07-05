@@ -78,8 +78,14 @@ pdf.js), or `.txt` / `.md`. The libraries are dynamically imported (out of the
 main bundle) and the pdf.js worker is served from `public/` (copied on
 postinstall), so extraction runs entirely offline, no CDN.
 
-Stubbed until a later phase: ERPNext read/write-back (`erpnext.ts`), the Supabase
-adapter, and Google Drive.
+ERPNext read/write-back (`erpnext.ts`) is wired: set the base URL and API
+key : secret in Settings, then the ERPNext window lists records, loads selected
+ones into the current cycle, and writes edited fields back. Write-back fetches
+the fresh document first and merges ONLY the KPI actual, evaluation, improvement
+action and action status onto matching rows by name; every other field and every
+unmatched row on the server is left untouched (per CLAUDE.md).
+
+Stubbed until a later phase: the Supabase adapter and Google Drive.
 
 ## Run it
 

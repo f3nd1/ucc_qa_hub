@@ -136,6 +136,27 @@ export interface CheckFlag {
   msg: string;
 }
 
+/* ERPNext REST shapes (loose: the server owns the full schema). */
+export interface ErpRecordSummary {
+  name: string;
+  department?: string;
+  criterion?: string;
+  period_from?: string;
+  period_to?: string;
+}
+export interface ErpItem {
+  name: string;
+  [k: string]: unknown;
+}
+export interface ErpDoc {
+  name: string;
+  department?: string;
+  criterion?: string;
+  period_from?: string;
+  period_to?: string;
+  items?: ErpItem[];
+}
+
 /** Raw JSON the model returns from a draft call. */
 export type DraftResponse =
   | {

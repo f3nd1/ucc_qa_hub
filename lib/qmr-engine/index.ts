@@ -28,8 +28,12 @@ export * from "./demo";
 export * from "./migration";
 export { EXTRACT_SUPPORTED, extractText } from "./extract";
 export {
-  ERPNEXT_STUB_MESSAGE,
+  erpConfig,
+  erpConfigured,
   apiList as erpApiList,
   apiGet as erpApiGet,
-  writeBack as erpWriteBack,
+  addErpDocs,
+  fetchErpRecords,
+  writeBackRecords,
 } from "./erpnext";
+export type { ErpConfig, WriteBackResult } from "./erpnext";

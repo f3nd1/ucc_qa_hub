@@ -33,6 +33,8 @@ export function SettingsPanel({
   const [finalModel, setFinalModel] = useState(settings.finalModel || "gpt-4o");
   const [selfCheck, setSelfCheck] = useState(settings.selfCheck ?? true);
   const [reviewer, setReviewer] = useState(settings.reviewer || "");
+  const [erpUrl, setErpUrl] = useState(settings.erpUrl || "");
+  const [erpToken, setErpToken] = useState(settings.erpToken || "");
 
   return (
     <div
@@ -98,6 +100,25 @@ export function SettingsPanel({
         <input style={inputStyle} value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
       </div>
 
+      <div style={{ marginBottom: 10 }}>
+        <label style={labelStyle}>ERPNext base URL</label>
+        <input style={inputStyle} value={erpUrl} onChange={(e) => setErpUrl(e.target.value)} placeholder="https://your-site.example.com" />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={labelStyle}>ERPNext API key : secret</label>
+        <input
+          style={inputStyle}
+          type="password"
+          value={erpToken}
+          onChange={(e) => setErpToken(e.target.value)}
+          placeholder="key:secret"
+        />
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>
+          Sent as <span style={{ fontFamily: "var(--mono)" }}>Authorization: token key:secret</span>. If CORS
+          blocks calls, host the app same-origin with ERPNext.
+        </div>
+      </div>
+
       <button
         onClick={() =>
           onSave({
@@ -106,6 +127,8 @@ export function SettingsPanel({
             finalModel: finalModel.trim(),
             selfCheck,
             reviewer: reviewer.trim(),
+            erpUrl: erpUrl.trim(),
+            erpToken: erpToken.trim(),
           })
         }
         style={{

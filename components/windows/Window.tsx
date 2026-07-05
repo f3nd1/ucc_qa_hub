@@ -14,6 +14,7 @@ export function Window({
   y,
   z,
   width = 440,
+  testId,
   onClose,
   onFocus,
   onMove,
@@ -25,6 +26,7 @@ export function Window({
   y: number;
   z: number;
   width?: number;
+  testId?: string;
   onClose: () => void;
   onFocus: () => void;
   onMove: (x: number, y: number) => void;
@@ -55,6 +57,7 @@ export function Window({
   return (
     <div
       onPointerDown={onFocus}
+      data-testid={testId}
       style={{
         position: "absolute",
         left: x,
