@@ -1,0 +1,242 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { store, useDb } from "@/lib/store/store";
+import {
+  activeCycle,
+  aiDraft,
+  exportFlat,
+  exportImportCSV,
+  exportProject,
+  loadDemo,
+  MIGRATION_SQL,
+  recordOrder,
+  records,
+  setProcedure,
+  setReview,
+  updateItem,
+  DEMO_PROC,
+} from "@/lib/qmr-engine";
+import type { Item, ReviewState, Settings } from "@/lib/qmr-engine";
+import { RecordCard } from "./RecordCard";
+import { SettingsPanel } from "./SettingsPanel";
+import { download } from "./download";
+import { rowKey } from "@/lib/qmr-engine";
+
+type ToastKind = "ok" | "err" | "info";
+
+export function DemoWorkbench() {
+  const db = useDb();
+  const [busyName, setBusyName] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [toast, setToast] = useState<{ text: string; kind: ToastKind } | null>(null);
+
+  useEffect(() => {
+    store.hydrate();
+  }, []);
+
+  const notify = useCallback((text: string, kind: ToastKind = "info") => {
+    setToast({ text, kind });
+    window.clearTimeout((notify as unknown as { _h?: number })._h);
+    (notify as unknown as { _h?: number })._h = window.setTimeout(
+      () => setToast(null),
+      kind === "err" ? 6000 : 3600,
+    );
+  }, []);
+
+  const order = recordOrder(db);
+  const cycleName = activeCycle(db)?.name || "none";
+
+  /* ---- handlers ---- */
+
+  function onLoadDemo() {
+    store.set(loadDemo(db));
+    notify("Demo loaded: 3 records, procedures + GD4 requirements, exemplars.", "ok");
+  }
+
+  function onSaveSettings(patch: Settings) {
+    store.set({ ...db, settings: { ...db.settings, ...patch } });
+    setShowSettings(false);
+    notify("Settings saved.", "ok");
+  }
+
+  function onClearProc(criterion: string) {
+    store.set(setProcedure(db, criterion, ""));
+    notify("Procedure cleared for " + criterion + " — drafting will now refuse.", "err");
+  }
+
+  function onRestoreProc(criterion: string) {
+    store.set(setProcedure(db, criterion, DEMO_PROC[criterion] || ""));
+    notify("Procedure restored for " + criterion + ".", "ok");
+  }
+
+  async function onDraft(parent: string, childName: string) {
+    const key = rowKey(parent, childName);
+    setBusyName(key);
+    try {
+      const r = await aiDraft(db, parent, childName);
+      store.set(r.db);
+      notify(r.message, r.status === "drafted" ? "ok" : r.status === "error" ? "err" : "info");
+    } finally {
+      setBusyName(null);
+    }
+  }
+
+  function onPatch(parent: string, childName: string, patch: Partial<Item>) {
+    store.set(updateItem(db, parent, childName, patch));
+  }
+
+  function onReview(parent: string, childName: string, state: ReviewState) {
+    const r = setReview(db, parent, childName, state);
+    store.set(r.db);
+    notify(r.message, r.status === "blocked" ? "err" : "ok");
+  }
+
+  function onExport(kind: "flat" | "import" | "project" | "migration") {
+    if (kind === "migration") {
+      download("qmr_supabase_migration.sql", MIGRATION_SQL, "sql");
+      notify("Migration SQL downloaded.", "ok");
+      return;
+    }
+    const res =
+      kind === "flat" ? exportFlat(db) : kind === "import" ? exportImportCSV(db) : exportProject(db);
+    if (res.error) {
+      notify(res.error, "err");
+      return;
+    }
+    if (res.file) {
+      download(res.file.filename, res.file.text, res.file.mime);
+      notify(res.file.filename + " downloaded.", "ok");
+    }
+  }
+
+  return (
+    <div>
+      {/* topbar */}
+      <div
+        style={{
+          background: "var(--navy)",
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "9px 14px",
+          flexWrap: "wrap",
+        }}
+      >
+        <h1 style={{ fontSize: 15, margin: 0, fontWeight: 600, letterSpacing: 0.3 }}>
+          QMR Agent Office
+        </h1>
+        <span
+          style={{
+            background: "rgba(255,255,255,.14)",
+            border: "1px solid rgba(255,255,255,.3)",
+            borderRadius: 14,
+            padding: "3px 12px",
+            fontSize: 12,
+          }}
+        >
+          Cycle: <b>{cycleName}</b>
+        </span>
+        <span style={{ fontSize: 11.5, opacity: 0.75 }}>Phase 1 · ported engine</span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={tbBtn} onClick={onLoadDemo}>
+            Load demo
+          </button>
+          <button style={tbBtn} onClick={() => onExport("flat")}>
+            Export flat CSV
+          </button>
+          <button style={tbBtn} onClick={() => onExport("import")}>
+            Data Import CSV
+          </button>
+          <button style={tbBtn} onClick={() => onExport("project")}>
+            Save project
+          </button>
+          <button style={tbBtn} onClick={() => onExport("migration")}>
+            Migration SQL
+          </button>
+          <button style={{ ...tbBtn, background: "#fff", color: "var(--navy)", fontWeight: 600 }} onClick={() => setShowSettings((s) => !s)}>
+            Settings
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 20px 70px", maxWidth: 1120 }}>
+        {showSettings && (
+          <SettingsPanel settings={db.settings} onSave={onSaveSettings} onClose={() => setShowSettings(false)} />
+        )}
+
+        {order.length === 0 ? (
+          <div
+            style={{
+              border: "1px dashed var(--border)",
+              borderRadius: 8,
+              background: "#fafbfd",
+              padding: 30,
+              textAlign: "center",
+              color: "var(--muted)",
+              marginTop: 24,
+            }}
+          >
+            <p style={{ marginTop: 0 }}>
+              <b style={{ color: "var(--navy)" }}>Phase 1 proving page.</b> Press <b>Load demo</b> to bring in
+              three records.
+            </p>
+            <div style={{ textAlign: "left", maxWidth: 640, margin: "12px auto 0", lineHeight: 1.7 }}>
+              To see the <b>refuse rule</b> with no API key: load the demo, then on any record press{" "}
+              <b>Clear procedure</b> and <b>Draft this activity</b>. The draft is blocked with a precise
+              question, and no network call is made. Add an OpenAI key in Settings to run a real grounded
+              draft.
+            </div>
+          </div>
+        ) : (
+          order.map((p) => (
+            <RecordCard
+              key={p}
+              db={db}
+              record={records(db)[p]}
+              busyName={busyName}
+              onDraft={(name) => onDraft(p, name)}
+              onPatch={(name, patch) => onPatch(p, name, patch)}
+              onReview={(name, state) => onReview(p, name, state)}
+              onClearProc={onClearProc}
+              onRestoreProc={onRestoreProc}
+            />
+          ))
+        )}
+      </div>
+
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 18,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: toast.kind === "err" ? "var(--err)" : toast.kind === "ok" ? "var(--ok)" : "var(--navy)",
+            color: "#fff",
+            borderRadius: 6,
+            padding: "9px 16px",
+            fontSize: 12.5,
+            maxWidth: "80vw",
+            boxShadow: "0 4px 14px rgba(0,0,0,.3)",
+            zIndex: 200,
+          }}
+        >
+          {toast.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const tbBtn: React.CSSProperties = {
+  background: "rgba(255,255,255,.12)",
+  color: "#fff",
+  border: "1px solid rgba(255,255,255,.32)",
+  borderRadius: 4,
+  padding: "5px 9px",
+  fontSize: 12,
+  whiteSpace: "nowrap",
+  cursor: "pointer",
+};

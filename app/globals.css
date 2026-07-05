@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* UCC navy / professional palette, ported from qmr-workbench.html :root. */
+:root {
+  --navy: #1a3b6e;
+  --navy-2: #24508f;
+  --navy-soft: #eef2f8;
+  --border: #ccd5e0;
+  --border-light: #d8dee9;
+  --bg: #f4f6f9;
+  --card: #fff;
+  --muted: #6b7686;
+  --ink: #24303f;
+  --err: #c62828;
+  --warn: #b26a00;
+  --info: #4a5a75;
+  --ok: #2e7d32;
+  --mono: "SF Mono", "Consolas", "Menlo", monospace;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
