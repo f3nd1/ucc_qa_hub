@@ -26,7 +26,7 @@ export * from "./csv";
 export * from "./io";
 export * from "./demo";
 export * from "./migration";
-export { EXTRACT_STUB_MESSAGE, extractText } from "./extract";
+export { EXTRACT_SUPPORTED, extractText } from "./extract";
 export {
   ERPNEXT_STUB_MESSAGE,
   apiList as erpApiList,

@@ -14,7 +14,9 @@ import {
   loadDemo,
   MIGRATION_SQL,
   renameCycle,
+  setDriveLink,
   setProcedure,
+  setRequirement,
   setReview,
   switchCycle,
   updateItem,
@@ -62,6 +64,18 @@ export function useWorkbench(notify: Notify) {
     (criterion: string) => {
       store.set(setProcedure(store.getState(), criterion, DEMO_PROC[criterion] || ""));
       notify("Procedure restored for " + criterion + ".", "ok");
+    },
+    [notify],
+  );
+
+  const saveCriterion = useCallback(
+    (criterion: string, requirement: string, procedure: string, drive: string) => {
+      let d = store.getState();
+      d = setRequirement(d, criterion, requirement);
+      d = setProcedure(d, criterion, procedure);
+      d = setDriveLink(d, criterion, drive);
+      store.set(d);
+      notify("Saved grounding for " + criterion + ".", "ok");
     },
     [notify],
   );
@@ -171,6 +185,7 @@ export function useWorkbench(notify: Notify) {
     saveSettings,
     clearProc,
     restoreProc,
+    saveCriterion,
     patch,
     review,
     draft,

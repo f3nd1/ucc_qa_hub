@@ -72,8 +72,14 @@ Agents (Phase 2), in `lib/agents/`:
   is surfaced for human accept or reject. Nothing is applied until you accept.
   AI recommends, humans decide.
 
-Stubbed until a later phase: file extraction (`extract.ts`, docx/pdf) and
-ERPNext read/write-back (`erpnext.ts`).
+File extraction (`extract.ts`) is wired: the criterion library can pull GD4
+requirements and procedures out of Word (`.docx` via mammoth), PDF (`.pdf` via
+pdf.js), or `.txt` / `.md`. The libraries are dynamically imported (out of the
+main bundle) and the pdf.js worker is served from `public/` (copied on
+postinstall), so extraction runs entirely offline, no CDN.
+
+Stubbed until a later phase: ERPNext read/write-back (`erpnext.ts`), the Supabase
+adapter, and Google Drive.
 
 ## Run it
 

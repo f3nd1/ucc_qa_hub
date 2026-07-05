@@ -129,7 +129,15 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
       case "settings":
         return <SettingsPanel settings={db.settings} onSave={saveSettings} onClose={() => closeWin("settings")} />;
       case "library":
-        return <CriterionLibrary db={db} onClearProc={clearProc} onRestoreProc={restoreProc} />;
+        return (
+          <CriterionLibrary
+            db={db}
+            onSave={wb.saveCriterion}
+            onClearProc={clearProc}
+            onRestoreProc={restoreProc}
+            notify={notify}
+          />
+        );
       case "agents-config":
         return (
           <AgentEditor
