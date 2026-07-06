@@ -166,7 +166,7 @@ const QMR = {
         if (cur) return Promise.resolve(cur);
         return new Promise((resolve) => {
             frappe.prompt(
-                { label: "Google OAuth client id", fieldname: "cid", fieldtype: "Data", reqd: 1 },
+                { label: "Google OAuth client id", fieldname: "cid", fieldtype: "Text", reqd: 1 },
                 (v) => {
                     const cid = (v.cid || "").trim();
                     localStorage.setItem(this.GOOGLE_LS, cid);
