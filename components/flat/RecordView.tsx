@@ -22,7 +22,7 @@ export function RecordView({
   db: Db;
   record: QmrRecord;
   busyName: string | null;
-  onDraft: (name: string, final: boolean) => void;
+  onDraft: (name: string) => void;
   onPatch: (name: string, patch: Partial<Item>) => void;
   onNote: (name: string, value: string) => void;
   onQuick: (name: string, mode: QuickMode) => void;
@@ -51,13 +51,25 @@ export function RecordView({
           {rec.department} · {rec.criterion} · {rec.period_from} to {rec.period_to}
         </span>
         <span className="spacer">
-          <button className="act-btn" onClick={onDraftEmpties}>
+          <button
+            className="act-btn"
+            title="Drafts every activity in this record that's still missing text, one at a time. Skips anything already filled in."
+            onClick={onDraftEmpties}
+          >
             AI draft empty in this record
           </button>
-          <button className="act-btn" onClick={onHarmonise}>
+          <button
+            className="act-btn"
+            title="Smooths the wording of this record's filled-in activities so they read as one consistent voice. Facts and numbers are never changed."
+            onClick={onHarmonise}
+          >
             Harmonise voice
           </button>
-          <button className="act-btn" onClick={onFinaliseRecord}>
+          <button
+            className="act-btn"
+            title="Promotes every activity in this record that's 'Under review' to 'Final'. Blocked on anything blank or still containing placeholder text."
+            onClick={onFinaliseRecord}
+          >
             Reviewed → final (this record)
           </button>
         </span>
@@ -118,7 +130,7 @@ export function RecordView({
           onPatch={(patch) => onPatch(row.name, patch)}
           onNote={(value) => onNote(row.name, value)}
           onQuick={(mode) => onQuick(row.name, mode)}
-          onDraft={(final) => onDraft(row.name, final)}
+          onDraft={() => onDraft(row.name)}
           onReview={(state) => onReview(row.name, state)}
           onCarry={() => onCarry(row.name)}
         />

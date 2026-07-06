@@ -20,6 +20,7 @@ import { CycleManager } from "./CycleManager";
 import { FiltersPanel } from "./FiltersPanel";
 import { SignOffPanel } from "./SignOffPanel";
 import { ErpNextPanel } from "./ErpNextPanel";
+import { HelpPage } from "../help/HelpPage";
 
 type WinKind =
   | "orchestrator"
@@ -31,7 +32,8 @@ type WinKind =
   | "cycles"
   | "filters"
   | "signoff"
-  | "erpnext";
+  | "erpnext"
+  | "help";
 interface WinItem {
   id: string;
   kind: WinKind;
@@ -54,6 +56,7 @@ const TITLES: Record<WinKind, string> = {
   filters: "Filters",
   signoff: "Sign-off",
   erpnext: "ERPNext",
+  help: "Help",
 };
 
 export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () => void }) {
@@ -124,11 +127,11 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
     focus("record");
   }
 
-  async function onDraft(parent: string, name: string, final: boolean) {
+  async function onDraft(parent: string, name: string) {
     const key = rowKey(parent, name);
     setBusyName(key);
     try {
-      await draft(parent, name, final);
+      await draft(parent, name);
     } finally {
       setBusyName(null);
     }
@@ -189,6 +192,8 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
         return <SignOffPanel db={db} onBulkFinalise={wb.bulkFinaliseNow} onOpenRecord={selectRecord} />;
       case "erpnext":
         return <ErpNextPanel db={db} notify={notify} onImport={wb.erpImport} onWriteBack={wb.erpWriteBack} />;
+      case "help":
+        return <HelpPage />;
       case "agent": {
         const agent = agents.find((a) => a.id === w.agentId);
         if (!agent) return <div>Agent not found.</div>;
@@ -208,7 +213,7 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
             db={db}
             record={rec}
             busyName={busyName}
-            onDraft={(name, final) => onDraft(rec.name, name, final)}
+            onDraft={(name) => onDraft(rec.name, name)}
             onPatch={(name, p) => patch(rec.name, name, p)}
             onNote={(name, value) => wb.setNote(rec.name, name, value)}
             onQuick={(name, mode) => wb.quickFill(rec.name, name, mode)}
@@ -298,6 +303,9 @@ export function Office3D({ notify, onSetMode }: { notify: Notify; onSetMode: () 
           </button>
           <button style={tbBtn} onClick={() => openWin({ id: "erpnext", kind: "erpnext" })}>
             ERPNext
+          </button>
+          <button style={tbBtn} onClick={() => openWin({ id: "help", kind: "help" })} title="What every button does">
+            Help
           </button>
           <button style={tbBtn} onClick={() => exportFile("flat")}>
             Export CSV

@@ -14,6 +14,8 @@ import {
   exportImportCSV,
   exportProject,
   finaliseRecord,
+  getProcedure,
+  getS,
   importCSVIntoActive,
   importProject,
   loadDemo,
@@ -106,8 +108,8 @@ export function useWorkbench(notify: Notify) {
   );
 
   const draft = useCallback(
-    async (parent: string, name: string, final?: boolean) => {
-      const r = await aiDraft(store.getState(), parent, name, { final });
+    async (parent: string, name: string) => {
+      const r = await aiDraft(store.getState(), parent, name);
       store.set(r.db);
       notify(r.message, r.status === "drafted" ? "ok" : r.status === "error" ? "err" : "info");
       return r.status;
@@ -141,13 +143,22 @@ export function useWorkbench(notify: Notify) {
 
   const draftRecordEmpties = useCallback(
     async (parent: string) => {
-      const rec = store.getState().cycles[store.getState().activeCycle || ""]?.records[parent];
+      const st0 = store.getState();
+      const rec = st0.cycles[st0.activeCycle || ""]?.records[parent];
       if (!rec) return;
       const empties = rec.items.filter(
         (it) => !String(it.evaluation_text || "").trim() || !String(it.improvement_action || "").trim(),
       );
       if (!empties.length) {
         notify("No empty narratives in this record.", "info");
+        return;
+      }
+      if (!getProcedure(st0, rec.criterion)) {
+        notify("Add the SOP for " + (rec.criterion || "this criterion") + " first — AI stays grounded.", "err");
+        return;
+      }
+      if (!getS(st0).openaiKey) {
+        notify("Add your OpenAI API key in Settings.", "err");
         return;
       }
       notify("Drafting " + empties.length + "…", "info");
@@ -163,6 +174,10 @@ export function useWorkbench(notify: Notify) {
 
   const draftAllEmpties = useCallback(async () => {
     const st = store.getState();
+    if (!getS(st).openaiKey) {
+      notify("Add your OpenAI API key in Settings.", "err");
+      return;
+    }
     const tasks: Array<[string, string]> = [];
     recordOrder(st).forEach((p) => {
       records(st)[p].items.forEach((it) => {

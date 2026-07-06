@@ -276,7 +276,6 @@ export function loadDemo(db: Db): Db {
   }
   d.settings = d.settings || {};
   if (!d.settings.openaiModel) d.settings.openaiModel = "gpt-4o-mini";
-  if (!d.settings.finalModel) d.settings.finalModel = "gpt-4o";
   if (d.settings.selfCheck === undefined) d.settings.selfCheck = true;
   return loadDemoRecords(d);
 }

@@ -55,7 +55,6 @@ function StatusLine({ s }: { s?: Status }) {
 export function SettingsPanel({ settings, onSave }: { settings: Settings; onSave: (patch: Settings) => void; onClose?: () => void }) {
   const [key, setKey] = useState(settings.openaiKey || "");
   const [model, setModel] = useState(settings.openaiModel || "gpt-4o-mini");
-  const [finalModel, setFinalModel] = useState(settings.finalModel || "gpt-4o");
   const [selfCheck, setSelfCheck] = useState(settings.selfCheck ?? true);
   const [reviewer, setReviewer] = useState(settings.reviewer || "");
   const [erpUrl, setErpUrl] = useState(settings.erpUrl || "");
@@ -121,7 +120,6 @@ export function SettingsPanel({ settings, onSave }: { settings: Settings; onSave
     onSave({
       openaiKey: key.trim(),
       openaiModel: model.trim(),
-      finalModel: finalModel.trim(),
       selfCheck,
       reviewer: reviewer.trim(),
       erpUrl: erpUrl.trim(),
@@ -147,22 +145,26 @@ export function SettingsPanel({ settings, onSave }: { settings: Settings; onSave
           <StatusLine s={status.openai} />
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-          <div style={{ flex: "1 1 200px" }}>
-            <label style={labelStyle}>Bulk model (fast, cheap)</label>
-            <input style={inputStyle} list="openai-models" value={model} onChange={(e) => setModel(e.target.value)} />
+        <div style={{ marginBottom: 10 }}>
+          <label style={labelStyle}>Model (used for drafting and harmonising)</label>
+          {models.length > 0 ? (
+            <select style={inputStyle} value={model} onChange={(e) => setModel(e.target.value)}>
+              {!models.includes(model) && <option value={model}>{model}</option>}
+              {models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input style={inputStyle} value={model} onChange={(e) => setModel(e.target.value)} placeholder="gpt-4o-mini" />
+          )}
+          <div style={hint}>
+            {models.length > 0
+              ? "Pick from the " + models.length + " models on your account."
+              : "Test the key above to pick from your account's models, or type one directly."}
           </div>
-          <div style={{ flex: "1 1 200px" }}>
-            <label style={labelStyle}>Final model (stronger)</label>
-            <input style={inputStyle} list="openai-models" value={finalModel} onChange={(e) => setFinalModel(e.target.value)} />
-          </div>
-          <datalist id="openai-models">
-            {models.map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
         </div>
-        {models.length > 0 && <div style={hint}>{models.length} models loaded — start typing in a field to pick one.</div>}
 
         <div style={{ marginTop: 8 }}>
           <label style={{ fontSize: 12.5 }}>

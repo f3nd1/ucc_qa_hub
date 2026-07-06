@@ -27,11 +27,6 @@ interface ChatMessage {
   content: string;
 }
 
-export interface DraftOpts {
-  /** Use the stronger "final" model for this call. */
-  final?: boolean;
-}
-
 /** Only the relevant criterion's grounding + this activity's facts are sent. */
 export function buildUserPayload(db: Db, rec: QmrRecord, row: Item) {
   const g = criterionGrounding(db, rec.criterion);
@@ -58,9 +53,8 @@ export function buildUserPayload(db: Db, rec: QmrRecord, row: Item) {
   };
 }
 
-export function pickModel(db: Db, final?: boolean): string {
-  const s = getS(db);
-  return final ? s.finalModel || s.openaiModel || "gpt-4o" : s.openaiModel || "gpt-4o-mini";
+export function pickModel(db: Db): string {
+  return getS(db).openaiModel || "gpt-4o-mini";
 }
 
 export async function callOpenAI(
@@ -100,12 +94,7 @@ export async function callOpenAI(
  *      has no concrete basis; we store that as a refusal and write no narrative.
  * Only status:"ok" ever populates evaluation_text / improvement_action.
  */
-export async function aiDraft(
-  db: Db,
-  parent: string,
-  childName: string,
-  opts: DraftOpts = {},
-): Promise<DraftResult> {
+export async function aiDraft(db: Db, parent: string, childName: string): Promise<DraftResult> {
   const rec = records(db)[parent];
   if (!rec) return { db, status: "error", message: "Record not found." };
   const row0 = rec.items.find((r) => r.name === childName);
@@ -133,7 +122,7 @@ export async function aiDraft(
   if (!s.openaiKey) return { db, status: "no-key", message: "Add your OpenAI API key in Settings." };
 
   try {
-    const model = pickModel(db, opts.final);
+    const model = pickModel(db);
     const payload = buildUserPayload(db, rec, row0);
     const out = (await callOpenAI(s, model, [
       { role: "system", content: SYSTEM_PROMPT },
@@ -217,7 +206,7 @@ export async function consistencyPass(db: Db, parent: string): Promise<DraftResu
     return { db, status: "error", message: "Need at least two filled evaluations to harmonise." };
 
   try {
-    const model = pickModel(db, true);
+    const model = pickModel(db);
     const inp = {
       criterion: rec.criterion,
       requirement: getRequirement(db, rec.criterion),

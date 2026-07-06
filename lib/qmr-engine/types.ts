@@ -85,7 +85,6 @@ export interface Cycle {
 export interface Settings {
   openaiKey?: string;
   openaiModel?: string;
-  finalModel?: string;
   selfCheck?: boolean;
   erpUrl?: string;
   erpToken?: string;

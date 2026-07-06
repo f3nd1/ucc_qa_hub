@@ -36,7 +36,7 @@ export function FullActivityCard({
   onPatch: (patch: Partial<Item>) => void;
   onNote: (value: string) => void;
   onQuick: (mode: QuickMode) => void;
-  onDraft: (final: boolean) => void;
+  onDraft: () => void;
   onReview: (state: ReviewState) => void;
   onCarry: () => void;
 }) {
@@ -151,13 +151,25 @@ export function FullActivityCard({
 
         <div className="qf-row">
           <span className="qf-label">Quick fill (no AI):</span>
-          <button className="qf-btn" onClick={() => onQuick("met")}>
+          <button
+            className="qf-btn"
+            title="Fills in a ready-made sentence for a fully met target. No AI call — edit it to match what actually happened."
+            onClick={() => onQuick("met")}
+          >
             Met target
           </button>
-          <button className="qf-btn" onClick={() => onQuick("nil")}>
+          <button
+            className="qf-btn"
+            title="Fills in the standard nil-activity wording for a period where nothing happened. No AI call."
+            onClick={() => onQuick("nil")}
+          >
             Nil period
           </button>
-          <button className="qf-btn" onClick={() => onQuick("short")}>
+          <button
+            className="qf-btn"
+            title="Fills in a template that acknowledges a below-target shortfall and asks for a Quality Action. No AI call."
+            onClick={() => onQuick("short")}
+          >
             Shortfall
           </button>
         </div>
@@ -182,11 +194,13 @@ export function FullActivityCard({
               onChange={(e) => onNote(e.target.value)}
             />
           </div>
-          <button className="ai-btn" disabled={busy} onClick={() => onDraft(false)}>
-            {busy ? "Drafting…" : "Draft (bulk model)"}
-          </button>
-          <button className="ai-btn" style={{ background: "#5e35b1" }} disabled={busy} onClick={() => onDraft(true)}>
-            Draft (final model)
+          <button
+            className="ai-btn"
+            disabled={busy}
+            title="Asks the AI to write the Evaluation Text and Improvement Action for this activity. It refuses and asks a question if it doesn't have enough to go on."
+            onClick={onDraft}
+          >
+            {busy ? "Drafting…" : "Draft"}
           </button>
         </div>
 

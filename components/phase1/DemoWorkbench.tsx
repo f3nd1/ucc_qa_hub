@@ -14,6 +14,7 @@ import { CycleManager } from "../office/CycleManager";
 import { CriterionLibrary } from "../office/CriterionLibrary";
 import { ErpNextPanel } from "../office/ErpNextPanel";
 import { AgentOffice } from "../phase2/AgentOffice";
+import { HelpPage } from "../help/HelpPage";
 
 type ModalKind = "cycles" | "library" | "import" | "settings" | "agents" | "erpnext" | null;
 
@@ -30,7 +31,7 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>(emptyFilter());
   const [busyName, setBusyName] = useState<string | null>(null);
-  const [view, setView] = useState<"records" | "settings" | "library">("records");
+  const [view, setView] = useState<"records" | "settings" | "library" | "help">("records");
   const [modal, setModal] = useState<ModalKind>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [critPre, setCritPre] = useState<string | undefined>(undefined);
@@ -49,11 +50,11 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
     return () => document.removeEventListener("click", h);
   }, [exportOpen]);
 
-  async function onDraft(parent: string, name: string, final: boolean) {
+  async function onDraft(parent: string, name: string) {
     const key = rowKey(parent, name);
     setBusyName(key);
     try {
-      await wb.draft(parent, name, final);
+      await wb.draft(parent, name);
     } finally {
       setBusyName(null);
     }
@@ -127,12 +128,23 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
             <button onClick={() => exp("migration")}>Download migration SQL</button>
           </div>
         </div>
+        <button className="tb-btn" onClick={() => setView("help")} title="What every button does">
+          Help
+        </button>
         <button className="tb-btn primary" onClick={() => setView("settings")}>
           Settings
         </button>
       </div>
 
-      {view === "settings" ? (
+      {view === "help" ? (
+        <div style={{ padding: "16px 20px 70px", maxWidth: 900 }}>
+          <button className="act-btn" style={{ marginBottom: 12 }} onClick={() => setView("records")}>
+            ← Back to records
+          </button>
+          <h2 style={{ color: "var(--navy)", fontSize: 16, margin: "0 0 12px" }}>Help</h2>
+          <HelpPage />
+        </div>
+      ) : view === "settings" ? (
         <div style={{ padding: "16px 20px 70px", maxWidth: 900 }}>
           <button className="act-btn" style={{ marginBottom: 12 }} onClick={() => setView("records")}>
             ← Back to records
@@ -168,7 +180,7 @@ export function DemoWorkbench({ notify, onSetMode }: { notify: Notify; onSetMode
               db={db}
               record={rec}
               busyName={busyName}
-              onDraft={(name, final) => onDraft(selected!, name, final)}
+              onDraft={(name) => onDraft(selected!, name)}
               onPatch={(name, patch) => wb.patch(selected!, name, patch)}
               onNote={(name, value) => wb.setNote(selected!, name, value)}
               onQuick={(name, mode) => wb.quickFill(selected!, name, mode)}
