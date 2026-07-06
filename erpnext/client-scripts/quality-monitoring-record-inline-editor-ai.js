@@ -43,6 +43,7 @@ const QMR = {
     MODEL_LS: "qmr_ai_model",
     SELFCHECK_LS: "qmr_ai_self_check",
     GOOGLE_LS: "qmr_ai_google_client_id",
+    HIDE_TIPS_LS: "qmr_ai_hide_tips",
 
     FREQ: ["Monthly", "Quarterly", "Annually", "Biannual", "Biennially", "Each Semester"],
     TIMING: ["Department Meeting", "Management Review", "Quarterly Review", "Annual Audit"],
@@ -488,6 +489,49 @@ const QMR = {
         d.show();
     },
 
+    // ---- plain-English step guide ----
+    steps_html() {
+        return `
+<ol style="margin:0;padding-left:18px;line-height:1.7;font-size:13px;">
+  <li><b>Set up once for this criterion.</b> Click <b>Grounding &amp; model</b> at the top. Paste two things:
+      what the audit expects (the GD4 requirement) and how your college actually does it (the procedure or SOP).
+      You can also paste a Google Doc link and click <b>Pull from Drive</b>. Click <b>Save grounding</b>.
+      You only do this once per criterion; it is remembered on this computer.</li>
+  <li><b>Say what happened.</b> If a result was below target, or nothing happened this period, type a short line
+      in the record's <b>Overall Note</b> (near the top of the form) explaining why. The AI needs this so it can
+      be honest rather than guess.</li>
+  <li><b>Write the text.</b> Click <b>Draft</b> on any activity card to fill just that one, or <b>Draft all empty</b>
+      to do every activity that is still blank. The first time, it asks for your OpenAI key (kept only for this
+      browser session).</li>
+  <li><b>Check, then save.</b> Read what it wrote in the Evaluation Text and Improvement Action boxes, edit anything
+      you want, then click <b>Save</b>. Nothing is saved until you do.</li>
+  <li><b>If it asks a question instead of writing:</b> that means it did not have enough to go on. Add the missing
+      detail (usually to the Overall Note, or the procedure) and draft again. It will never make up facts, dates,
+      or numbers.</li>
+</ol>`;
+    },
+    how_to() {
+        const d = new frappe.ui.Dialog({ title: "How to use AI Draft", size: "large" });
+        d.$body.html(this.steps_html());
+        d.show();
+    },
+    tips_banner() {
+        if (localStorage.getItem(this.HIDE_TIPS_LS) === "true") return "";
+        return `
+<div class="qmr-tips">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+    <b style="color:#1a3b6e;">First time here? Three quick steps:</b>
+    <button class="qmr-btn" data-hidetips style="margin-left:auto;">Got it, hide this</button>
+  </div>
+  <ol style="margin:0;padding-left:18px;line-height:1.6;">
+    <li><b>Grounding &amp; model</b> (top): paste the audit requirement and your procedure once per criterion.</li>
+    <li>Type a short line in <b>Overall Note</b> if a target was missed or nothing happened.</li>
+    <li>Click <b>Draft</b> on a card (or <b>Draft all empty</b>), then review and <b>Save</b>.</li>
+  </ol>
+  <div style="margin-top:5px;"><a href="#" data-howto style="font-size:12px;">See the full step by step</a></div>
+</div>`;
+    },
+
     // ---- render the inline editor with per-card Draft buttons ----
     render(frm) {
         const wrapper = frm.fields_dict.qmr_inline_editor.$wrapper;
@@ -521,31 +565,35 @@ const QMR = {
   .qmr-ground-ok{background:#e8f5e9;color:#2e7d32;}
   .qmr-ground-no{background:#fff3e0;color:#e65100;}
   .qmr-muted{color:#777;font-size:12px;}
+  .qmr-tips{background:#eef4ff;border:1px solid #c5d2ea;border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:12.5px;color:#24303f;}
 </style>`;
 
         const toolbar = `
 <div class="qmr-toolbar">
-  <button class="qmr-btn primary" data-draftall>Draft all empty</button>
-  <button class="qmr-btn" data-grounding>Grounding &amp; model</button>
-  <span class="qmr-ground ${has_proc ? "qmr-ground-ok" : "qmr-ground-no"}">
+  <button class="qmr-btn primary" data-draftall title="Fill Evaluation Text and Improvement Action for every activity that is still blank in this record.">Draft all empty</button>
+  <button class="qmr-btn" data-grounding title="Set, once per criterion, what the audit expects and how your college does it. The AI writes only from this, so it stays honest.">Grounding &amp; model</button>
+  <button class="qmr-btn" data-howto title="A short step by step, in plain language.">How to use</button>
+  <span class="qmr-ground ${has_proc ? "qmr-ground-ok" : "qmr-ground-no"}" title="${has_proc ? "A procedure is set for this criterion, so drafting is allowed." : "No procedure set yet. Click Grounding and model to add one before drafting."}">
     ${criterion ? (has_proc ? "Procedure loaded for " + this.esc(criterion) : "No procedure for " + this.esc(criterion) + " (drafting is blocked)") : "No Criterion on this record"}
   </span>
   <span class="qmr-muted">Model: ${this.esc(this.get_model())}</span>
 </div>`;
 
+        const banner = this.tips_banner();
+
         if (!items.length) {
-            wrapper.html(css + toolbar + `<div style="padding:10px;border:1px dashed #ccd5e0;border-radius:6px;background:#fafbfd;color:#7b7b7b;font-size:13px;">No activities yet. Load them from the Template and save, then draft here.</div>`);
+            wrapper.html(css + banner + toolbar + `<div style="padding:10px;border:1px dashed #ccd5e0;border-radius:6px;background:#fafbfd;color:#7b7b7b;font-size:13px;">No activities yet. Load them from the Template and save, then draft here.</div>`);
             this.wire(frm, wrapper);
             return;
         }
 
-        let html = css + toolbar;
+        let html = css + banner + toolbar;
         items.forEach((row, i) => {
             html += `
 <div class="qmr-card" data-idx="${row.idx}">
   <div class="qmr-header ${this.header_class(row.action_status)}">
     <span>#${i + 1}. ${this.esc(row.activity_name || "Untitled Activity")}</span>
-    <button class="qmr-draft" data-draft="${row.idx}">Draft</button>
+    <button class="qmr-draft" data-draft="${row.idx}" title="Let the AI write this activity's KPI Target Description, Evaluation Text and Improvement Action, grounded in the procedure and the numbers. Review before saving.">Draft</button>
   </div>
   <div class="qmr-body">
     <div class="qmr-grid">
@@ -589,8 +637,10 @@ const QMR = {
             frm.dirty();
         });
 
-        wrapper.off("click.qmr").on("click.qmr", "[data-draft],[data-draftall],[data-grounding]", async function () {
+        wrapper.off("click.qmr").on("click.qmr", "[data-draft],[data-draftall],[data-grounding],[data-howto],[data-hidetips]", async function (e) {
             const $b = $(this);
+            if ($b.is("[data-howto]")) { e.preventDefault(); self.how_to(); return; }
+            if ($b.is("[data-hidetips]")) { localStorage.setItem(self.HIDE_TIPS_LS, "true"); self.render(frm); return; }
             if ($b.is("[data-grounding]")) { self.open_grounding(frm); return; }
             if ($b.is("[data-draftall]")) { self.draft_all_empty(frm); return; }
             const idx = $b.data("draft");
