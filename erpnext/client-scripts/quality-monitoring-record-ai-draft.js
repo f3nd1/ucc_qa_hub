@@ -21,18 +21,16 @@
    Where the grounding text comes from
    ------------------------------------
    This DocType has no field for the GD4 requirement or procedure text, only
-   a short Criterion code. So this script fetches that text from the same
-   place the QMR Agent Office (Next.js) app keeps it:
-     1. The qmr_project row in Supabase (the same criterion library the app
-        syncs), for requirements[criterion] and procedures[criterion].
-     2. If that criterion also has a Drive link recorded, and it points to a
-        Google Doc, the script signs in to Google (read-only Drive access)
-        and pulls that document's live text, using it as the procedure in
-        place of the Supabase-cached copy. Word/PDF Drive links are not
-        pulled live here (no bundler available in a plain client script) -
-        the Supabase-cached text is used instead for those.
-     3. No procedure available from either source: the whole record refuses,
-        with a message telling you where to add one.
+   a short Criterion code, and no external database is used to look one up.
+   Instead, clicking Run opens a small "Grounding for <criterion>" dialog:
+   paste the requirement and procedure text directly, or paste a link to a
+   Google Doc and click Pull from Drive to load its text live. What you enter
+   is cached in this browser against that Criterion code, so you only need to
+   fill it in once per criterion, not on every run (the dialog pre-fills from
+   the cache and you can edit it any time).
+
+   No procedure text (typed or pulled) means the record refuses to draft,
+   with a message telling you to fill it in.
 
    This DocType also has no per-activity note or evidence field, so the only
    extra context is the record's Overall Note. That is normally enough for a
@@ -43,16 +41,13 @@
    One-time setup
    --------------
    Click AI Draft > Settings on any Quality Monitoring Record and fill in:
-     - OpenAI API key and model (same as the Next.js app; use a
-       spend-capped, scoped key).
-     - Supabase project URL and anon key, matching the project the Next.js
-       app syncs to (Settings > Supabase there, then Export > Save to
-       Supabase once so the criterion library exists in qmr_project).
-     - Google OAuth client id, only needed if you want the live Drive pull.
-       This ERPNext site's URL must be added as an authorised JavaScript
-       origin on that OAuth client in Google Cloud Console.
-   These are stored in this browser's localStorage only, matching the
-   browser-key pattern used throughout the QMR Agent Office. Every user who
+     - OpenAI API key, then click Fetch models to list your account's chat
+       models in the Model dropdown. Use a spend-capped, scoped key.
+     - Google OAuth client id, only if you want to pull a Google Doc's text
+       live from within the Grounding dialog. This ERPNext site's URL must be
+       added as an authorised JavaScript origin on that OAuth client in
+       Google Cloud Console. Leave blank to paste text by hand instead.
+   These are stored in this browser's localStorage only. Every user who
    drafts needs their own OpenAI key configured in their own browser.
    ========================================================= */
 
@@ -73,8 +68,6 @@ qmr_ai_draft.LS = {
   openai_model: "qmr_ai_openai_model",
   self_check: "qmr_ai_self_check",
   google_client_id: "qmr_ai_google_client_id",
-  supabase_url: "qmr_ai_supabase_url",
-  supabase_key: "qmr_ai_supabase_key",
 };
 
 qmr_ai_draft.get_settings = function () {
@@ -83,40 +76,84 @@ qmr_ai_draft.get_settings = function () {
     openai_model: localStorage.getItem(qmr_ai_draft.LS.openai_model) || "gpt-4o-mini",
     self_check: localStorage.getItem(qmr_ai_draft.LS.self_check) !== "false",
     google_client_id: localStorage.getItem(qmr_ai_draft.LS.google_client_id) || "",
-    supabase_url: localStorage.getItem(qmr_ai_draft.LS.supabase_url) || "",
-    supabase_key: localStorage.getItem(qmr_ai_draft.LS.supabase_key) || "",
   };
+};
+
+/** OpenAI's chat-capable models, for the Fetch models button. */
+qmr_ai_draft.fetch_openai_models = async function (key) {
+  const res = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: "Bearer " + key } });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error("HTTP " + res.status + ": " + t.slice(0, 120));
+  }
+  const data = await res.json();
+  const ids = (data.data || [])
+    .map((m) => m.id || "")
+    .filter(Boolean)
+    .sort();
+  const chat = ids.filter(
+    (id) => /gpt|o1|o3|o4|chatgpt/i.test(id) && !/embedding|whisper|tts|dall|moderation|audio|realtime|image/i.test(id),
+  );
+  return chat.length ? chat : ids;
 };
 
 qmr_ai_draft.open_settings = function () {
   const s = qmr_ai_draft.get_settings();
+  const preset_models = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "o3-mini"];
+  if (s.openai_model && !preset_models.includes(s.openai_model)) preset_models.unshift(s.openai_model);
+
   const d = new frappe.ui.Dialog({
     title: "AI Draft settings (stored in this browser only)",
     fields: [
-      { fieldname: "openai_key", label: "OpenAI API key", fieldtype: "Password", default: s.openai_key },
-      { fieldname: "openai_model", label: "OpenAI model", fieldtype: "Data", default: s.openai_model },
+      {
+        fieldname: "openai_key",
+        label: "OpenAI API key",
+        fieldtype: "Small Text",
+        default: s.openai_key,
+        description: "Stored in this browser only. Use a spend-capped, scoped key.",
+      },
+      {
+        fieldname: "openai_model",
+        label: "OpenAI model",
+        fieldtype: "Select",
+        options: preset_models.join("\n"),
+        default: s.openai_model,
+      },
+      {
+        fieldname: "fetch_models",
+        fieldtype: "Button",
+        label: "Fetch models",
+        click: async () => {
+          const key = d.get_value("openai_key");
+          if (!key) {
+            frappe.msgprint("Enter your OpenAI API key first.");
+            return;
+          }
+          try {
+            const models = await qmr_ai_draft.fetch_openai_models(key);
+            d.set_df_property("openai_model", "options", models.join("\n"));
+            const cur = d.get_value("openai_model");
+            if (models.length && !models.includes(cur)) d.set_value("openai_model", models[0]);
+            frappe.show_alert({ message: models.length + " models loaded.", indicator: "green" });
+          } catch (e) {
+            frappe.msgprint("Fetch failed: " + e.message);
+          }
+        },
+      },
       {
         fieldname: "self_check",
         label: "Self-check pass (reviews and corrects its own draft)",
         fieldtype: "Check",
         default: s.self_check ? 1 : 0,
       },
-      { fieldname: "sb1", fieldtype: "Section Break", label: "Grounding source" },
-      {
-        fieldname: "supabase_url",
-        label: "Supabase project URL",
-        fieldtype: "Data",
-        default: s.supabase_url,
-        description: "The QMR Agent Office project you sync the criterion library to.",
-      },
-      { fieldname: "supabase_key", label: "Supabase anon key", fieldtype: "Password", default: s.supabase_key },
+      { fieldname: "sb1", fieldtype: "Section Break", label: "Google Drive (optional)" },
       {
         fieldname: "google_client_id",
         label: "Google OAuth client id",
         fieldtype: "Data",
         default: s.google_client_id,
         description:
-          "For live-pulling a Google Doc procedure from the criterion's Drive link. This site's URL must be an authorised JavaScript origin on that OAuth client. Leave blank to rely on the Supabase-cached text only.",
+          "Only needed if you want to pull a Google Doc's live text when drafting. This site's URL must be an authorised JavaScript origin on that OAuth client.",
       },
     ],
     primary_action_label: "Save",
@@ -124,8 +161,6 @@ qmr_ai_draft.open_settings = function () {
       localStorage.setItem(qmr_ai_draft.LS.openai_key, values.openai_key || "");
       localStorage.setItem(qmr_ai_draft.LS.openai_model, values.openai_model || "gpt-4o-mini");
       localStorage.setItem(qmr_ai_draft.LS.self_check, values.self_check ? "true" : "false");
-      localStorage.setItem(qmr_ai_draft.LS.supabase_url, values.supabase_url || "");
-      localStorage.setItem(qmr_ai_draft.LS.supabase_key, values.supabase_key || "");
       localStorage.setItem(qmr_ai_draft.LS.google_client_id, values.google_client_id || "");
       frappe.show_alert({ message: "AI Draft settings saved.", indicator: "green" });
       d.hide();
@@ -134,28 +169,7 @@ qmr_ai_draft.open_settings = function () {
   d.show();
 };
 
-/* ---- Supabase: the criterion library cache ---- */
-
-qmr_ai_draft.fetch_supabase_criterion = async function (settings, criterion) {
-  if (!settings.supabase_url || !settings.supabase_key) {
-    return { requirement: "", procedure: "", drive_link: "" };
-  }
-  const url = settings.supabase_url.replace(/\/+$/, "") + "/rest/v1/qmr_project?id=eq.default&select=data";
-  const res = await fetch(url, {
-    headers: { apikey: settings.supabase_key, Authorization: "Bearer " + settings.supabase_key },
-  });
-  if (!res.ok) throw new Error("Supabase fetch failed: HTTP " + res.status);
-  const rows = await res.json();
-  const data = rows && rows[0] && rows[0].data;
-  if (!data) return { requirement: "", procedure: "", drive_link: "" };
-  return {
-    requirement: (data.requirements && data.requirements[criterion]) || "",
-    procedure: (data.procedures && data.procedures[criterion]) || "",
-    drive_link: (data.driveLinks && data.driveLinks[criterion]) || "",
-  };
-};
-
-/* ---- Google Drive: live pull for a Google Doc procedure ---- */
+/* ---- Google Drive: optional live pull for a Google Doc ---- */
 
 qmr_ai_draft.parse_drive_id = function (url) {
   const s = String(url || "").trim();
@@ -204,39 +218,106 @@ qmr_ai_draft.drive_fetch_text = async function (token, file_id) {
   if (!meta_res.ok) throw new Error("Drive metadata HTTP " + meta_res.status);
   const meta = await meta_res.json();
   if (meta.mimeType !== "application/vnd.google-apps.document") {
-    throw new Error("Only a Google Doc can be pulled live here. Word/PDF links fall back to the Supabase-cached text.");
+    throw new Error("Only a Google Doc can be pulled live here. Paste the text in directly for Word/PDF files.");
   }
-  const res = await fetch(
-    "https://www.googleapis.com/drive/v3/files/" + file_id + "/export?mimeType=text/plain",
-    { headers: auth },
-  );
+  const res = await fetch("https://www.googleapis.com/drive/v3/files/" + file_id + "/export?mimeType=text/plain", {
+    headers: auth,
+  });
   if (!res.ok) throw new Error("Drive export HTTP " + res.status);
   return (await res.text()).trim();
 };
 
-/* ---- assemble the grounding for this record's Criterion ---- */
+/* ---- grounding: entered per criterion, cached in this browser ---- */
 
-qmr_ai_draft.get_grounding = async function (frm, settings) {
-  const criterion = frm.doc.criterion;
-  if (!criterion) throw new Error("This record has no Criterion set.");
+qmr_ai_draft.grounding_cache_key = function (criterion) {
+  return "qmr_ai_grounding_" + criterion;
+};
 
-  const cached = await qmr_ai_draft.fetch_supabase_criterion(settings, criterion);
-  let procedure = cached.procedure || "";
-
-  if (cached.drive_link) {
-    try {
-      const file_id = qmr_ai_draft.parse_drive_id(cached.drive_link);
-      if (file_id) {
-        const token = await qmr_ai_draft.drive_token(settings.google_client_id);
-        const live = await qmr_ai_draft.drive_fetch_text(token, file_id);
-        if (live) procedure = live;
-      }
-    } catch (e) {
-      console.warn("Drive pull skipped, using the Supabase-cached procedure instead:", e.message);
-    }
+qmr_ai_draft.get_cached_grounding = function (criterion) {
+  try {
+    const raw = localStorage.getItem(qmr_ai_draft.grounding_cache_key(criterion));
+    return raw ? JSON.parse(raw) : { requirement: "", procedure: "", drive_link: "" };
+  } catch (e) {
+    return { requirement: "", procedure: "", drive_link: "" };
   }
+};
 
-  return { requirement: cached.requirement || "", procedure };
+qmr_ai_draft.save_cached_grounding = function (criterion, g) {
+  localStorage.setItem(qmr_ai_draft.grounding_cache_key(criterion), JSON.stringify(g));
+};
+
+/** Opens the grounding dialog for this record's criterion. Resolves with
+    {requirement, procedure} on Use, or rejects on cancel / missing criterion. */
+qmr_ai_draft.prompt_grounding = function (frm, settings) {
+  return new Promise((resolve, reject) => {
+    const criterion = frm.doc.criterion;
+    if (!criterion) {
+      reject(new Error("This record has no Criterion set."));
+      return;
+    }
+    const cached = qmr_ai_draft.get_cached_grounding(criterion);
+    let resolved = false;
+
+    const d = new frappe.ui.Dialog({
+      title: "Grounding for " + criterion,
+      fields: [
+        {
+          fieldname: "requirement",
+          label: "GD4 requirement (what EduTrust expects)",
+          fieldtype: "Small Text",
+          default: cached.requirement,
+        },
+        {
+          fieldname: "drive_link",
+          label: "Google Doc link (optional)",
+          fieldtype: "Data",
+          default: cached.drive_link,
+          description: "Paste a Google Doc link, then click Pull from Drive to load its text below.",
+        },
+        {
+          fieldname: "pull_drive",
+          fieldtype: "Button",
+          label: "Pull from Drive",
+          click: async () => {
+            const link = d.get_value("drive_link");
+            if (!link) {
+              frappe.msgprint("Paste a Google Doc link first.");
+              return;
+            }
+            try {
+              const file_id = qmr_ai_draft.parse_drive_id(link);
+              if (!file_id) throw new Error("Could not read a file id from that link.");
+              const token = await qmr_ai_draft.drive_token(settings.google_client_id);
+              const text = await qmr_ai_draft.drive_fetch_text(token, file_id);
+              d.set_value("procedure", text);
+              frappe.show_alert({ message: "Pulled " + text.length + " characters from Drive.", indicator: "green" });
+            } catch (e) {
+              frappe.msgprint("Drive pull failed: " + e.message);
+            }
+          },
+        },
+        {
+          fieldname: "procedure",
+          label: "Procedure / SOP text (authoritative, required to draft)",
+          fieldtype: "Small Text",
+          default: cached.procedure,
+        },
+      ],
+      primary_action_label: "Use this grounding",
+      primary_action(values) {
+        const g = { requirement: values.requirement || "", procedure: values.procedure || "", drive_link: values.drive_link || "" };
+        qmr_ai_draft.save_cached_grounding(criterion, g);
+        resolved = true;
+        d.hide();
+        resolve(g);
+      },
+    });
+
+    d.onhide = () => {
+      if (!resolved) reject(new Error("Cancelled."));
+    };
+    d.show();
+  });
 };
 
 /* ---- grounded drafting (system prompt ported from the QMR engine) ---- */
@@ -316,28 +397,28 @@ qmr_ai_draft.run = async function (frm) {
     return;
   }
 
-  let grounding;
-  try {
-    grounding = await qmr_ai_draft.get_grounding(frm, settings);
-  } catch (e) {
-    frappe.msgprint("Cannot draft: " + e.message);
-    return;
-  }
-  if (!grounding.procedure) {
-    frappe.msgprint(
-      "No procedure available for " +
-        (frm.doc.criterion || "this criterion") +
-        ". Add one in the QMR Agent Office criterion library and sync to Supabase, or add a Drive link to a Google Doc, then try again.",
-    );
-    return;
-  }
-
   const items = frm.doc.items || [];
   const targets = items.filter(
     (r) => !String(r.evaluation_text || "").trim() || !String(r.improvement_action || "").trim(),
   );
   if (!targets.length) {
     frappe.msgprint("No empty activities in this record. Nothing to draft.");
+    return;
+  }
+
+  let grounding;
+  try {
+    grounding = await qmr_ai_draft.prompt_grounding(frm, settings);
+  } catch (e) {
+    if (e && e.message && e.message !== "Cancelled.") frappe.msgprint(e.message);
+    return;
+  }
+  if (!grounding.procedure || !grounding.procedure.trim()) {
+    frappe.msgprint(
+      "No procedure text given for " +
+        (frm.doc.criterion || "this criterion") +
+        ". Add it in the Grounding dialog (paste it, or pull from Drive), then try again.",
+    );
     return;
   }
 
