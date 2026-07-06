@@ -300,6 +300,7 @@ const QMR = {
     },
 
     async draft_all_empty(frm) {
+        const self = this;
         const items = frm.doc.items || [];
         const targets = items.filter(
             (r) => !String(r.evaluation_text || "").trim() || !String(r.improvement_action || "").trim()
@@ -308,30 +309,109 @@ const QMR = {
             frappe.msgprint("No empty activities. Nothing to draft.");
             return;
         }
-        frappe.dom.freeze(`Drafting ${targets.length} activit${targets.length === 1 ? "y" : "ies"}...`);
+
+        // Fail fast on the two things that would otherwise freeze then error.
+        const criterion = frm.doc.criterion;
+        if (!criterion) { frappe.msgprint("This record has no Criterion set."); return; }
+        if (!String(this.get_grounding(criterion).procedure || "").trim()) {
+            frappe.msgprint("No procedure set for " + criterion + ". Click 'Grounding & model' first.");
+            this.open_grounding(frm);
+            return;
+        }
+        // Prompt for the key BEFORE showing the progress dialog, so it is never
+        // hidden behind an overlay.
+        const key = await this.get_key();
+        if (!key) return;
+
+        const prog = this.progress_dialog(targets.length);
         let drafted = 0;
         const skipped = [];
+        let cancelled = false;
+        prog.on_cancel(() => { cancelled = true; });
         try {
-            for (const row of targets) {
+            for (let i = 0; i < targets.length; i++) {
+                if (cancelled) break;
+                const row = targets[i];
+                prog.step(i, row.activity_name);
                 const r = await this.draft_row(frm, row.idx, { silent: true });
-                if (r === "ok") drafted++;
-                else if (r === "401") break;
-                else if (r === "no-proc") { skipped.push({ a: row.activity_name, q: "No procedure set." }); break; }
-                else if (r && r.status === "need_input") skipped.push({ a: row.activity_name, q: r.question });
+                if (r === "ok") { drafted++; prog.result(row.activity_name, "ok"); }
+                else if (r === "401") { prog.result(row.activity_name, "401"); break; }
+                else if (r === "no-proc") { skipped.push({ a: row.activity_name, q: "No procedure set." }); prog.result(row.activity_name, "no-proc"); break; }
+                else if (r && r.status === "need_input") { skipped.push({ a: row.activity_name, q: r.question }); prog.result(row.activity_name, "need_input", r.question); }
+                else { prog.result(row.activity_name, "error"); }
                 await new Promise((x) => setTimeout(x, 300));
             }
         } finally {
-            frappe.dom.unfreeze();
+            this.render(frm);
+            let summary = `Drafted ${drafted} of ${targets.length}${cancelled ? " (stopped early)" : ""}.`;
+            if (skipped.length)
+                summary +=
+                    " <b>Needs your input:</b><ul style='margin:6px 0 0;padding-left:18px;'>" +
+                    skipped.map((s) => `<li><b>${this.esc(s.a)}:</b> ${this.esc(s.q)}</li>`).join("") +
+                    "</ul>";
+            summary += "<div style='margin-top:6px;'>Nothing is saved yet. Review, then Save.</div>";
+            prog.finish(summary, skipped.length ? "orange" : "green");
         }
-        this.render(frm);
-        let msg = `Drafted ${drafted} of ${targets.length}.`;
-        if (skipped.length)
-            msg +=
-                "<br><br><b>Needs your input:</b><ul>" +
-                skipped.map((s) => `<li><b>${this.esc(s.a)}:</b> ${this.esc(s.q)}</li>`).join("") +
-                "</ul>";
-        msg += "<br>Nothing is saved yet. Review, then Save.";
-        frappe.msgprint({ title: "AI Draft", message: msg, indicator: skipped.length ? "orange" : "green" });
+    },
+
+    // ---- live progress dialog for "Draft all empty" ----
+    progress_dialog(total) {
+        const self = this;
+        const d = new frappe.ui.Dialog({ title: "Drafting activities", size: "large" });
+        d.$body.html(`
+<div style="font-size:13px;">
+  <div style="background:#eef2f8;border-radius:6px;height:12px;overflow:hidden;margin-bottom:4px;">
+    <div class="qmr-pbar" style="background:#1a3b6e;height:100%;width:0%;transition:width .3s;"></div>
+  </div>
+  <div class="qmr-pcount" style="text-align:right;color:#777;font-size:11.5px;margin-bottom:8px;">0 of ${total}</div>
+  <div class="qmr-pcurrent" style="margin-bottom:8px;color:#1a3b6e;font-weight:600;">Starting...</div>
+  <ol class="qmr-plog" style="margin:0;padding-left:20px;line-height:1.8;max-height:240px;overflow:auto;"></ol>
+  <div class="qmr-psummary" style="margin-top:10px;"></div>
+</div>`);
+        // Only a Cancel/Close button; hide the header X so it cannot be dismissed
+        // mid-run and leave the loop running invisibly.
+        d.$wrapper.find(".modal-header .btn-modal-close, .modal-header .close").hide();
+        let onCancel = null;
+        d.set_primary_action("Stop", () => {
+            if (onCancel) onCancel();
+            d.get_primary_btn().prop("disabled", true).text("Stopping...");
+        });
+        d.show();
+
+        const $bar = d.$body.find(".qmr-pbar");
+        const $count = d.$body.find(".qmr-pcount");
+        const $current = d.$body.find(".qmr-pcurrent");
+        const $log = d.$body.find(".qmr-plog");
+        const label = {
+            ok: (n) => `<li style="color:#2e7d32;">&#10003; <b>${self.esc(n)}</b> drafted</li>`,
+            need_input: (n, q) => `<li style="color:#e65100;">&#9873; <b>${self.esc(n)}</b> needs input: ${self.esc(q || "")}</li>`,
+            error: (n) => `<li style="color:#c62828;">&#10007; <b>${self.esc(n)}</b> could not be drafted</li>`,
+            "no-proc": (n) => `<li style="color:#c62828;">&#10007; <b>${self.esc(n)}</b> stopped: no procedure set</li>`,
+            "401": (n) => `<li style="color:#c62828;">&#10007; <b>${self.esc(n)}</b> stopped: OpenAI rejected the key</li>`
+        };
+
+        return {
+            step(i, name) {
+                $count.text(`${i} of ${total}`);
+                $bar.css("width", Math.round((i / total) * 100) + "%");
+                $current.html(`Drafting ${i + 1} of ${total}: <span style="font-weight:400;">${self.esc(name || "activity")}</span> &nbsp;<span style="color:#999;font-weight:400;">(waiting for the AI...)</span>`);
+            },
+            result(name, status, q) {
+                const fn = label[status] || label.error;
+                $log.append(fn(name, q));
+                $log.scrollTop($log[0].scrollHeight);
+            },
+            on_cancel(fn) { onCancel = fn; },
+            finish(summaryHtml, indicator) {
+                $bar.css("width", "100%");
+                $count.text(`${total} of ${total}`);
+                $current.html('<span style="color:#2e7d32;">&#10003; Done. Review the drafts below, then Save the form.</span>');
+                const colour = indicator === "orange" ? "#e65100" : "#2e7d32";
+                d.$body.find(".qmr-psummary").html(`<div style="border-top:1px solid #e5e9f0;padding-top:8px;color:${colour};">${summaryHtml}</div>`);
+                d.get_primary_btn().prop("disabled", false).text("Close").off("click").on("click", () => d.hide());
+                d.$wrapper.find(".modal-header .btn-modal-close, .modal-header .close").show();
+            }
+        };
     },
 
     // ---- grounding & model dialog ----
