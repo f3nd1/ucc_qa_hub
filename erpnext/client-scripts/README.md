@@ -22,10 +22,10 @@ The Draft buttons fill the activity's **KPI Target Description** (only if blank)
 ## Set-up on the form
 
 1. Open a Quality Monitoring Record. Click **Grounding & model** (top toolbar).
-2. For this record's Criterion, paste the **Procedure/SOP** text (or paste a
-   Google Doc link and click **Pull from Drive**). This is cached in your
-   browser per criterion, so you only do it once per criterion. Optionally
-   click **Fetch available models** to pick the OpenAI model. Save grounding.
+2. For this record's Criterion, paste the **Procedure/SOP** text. This is
+   cached in your browser per criterion, so you only do it once per criterion.
+   Optionally click **Fetch available models** to pick the OpenAI model. Save
+   grounding.
 3. Click **Draft** on a card (or **Draft all empty**). The first time, it asks
    for your OpenAI API key; it is held for the browser session only and cleared
    automatically if OpenAI rejects it.

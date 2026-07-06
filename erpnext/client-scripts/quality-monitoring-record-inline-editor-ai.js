@@ -17,9 +17,8 @@
 //
 // Grounding, and the rule that must not be weakened:
 //   - Each draft is grounded in this criterion's UCC procedure. Click
-//     "Grounding & model" once per criterion to paste it (or pull the
-//     procedure from a Google Doc link). It is cached in this browser
-//     per criterion.
+//     "Grounding & model" once per criterion to paste it. It is cached in
+//     this browser per criterion.
 //   - No procedure means it will not draft. If an activity has no concrete
 //     basis (for example a shortfall with no Overall Note explaining the
 //     cause), that activity refuses and asks a question instead of inventing.
@@ -42,7 +41,6 @@ const QMR = {
     KEY_SS: "qmr_ai_key",
     MODEL_LS: "qmr_ai_model",
     SELFCHECK_LS: "qmr_ai_self_check",
-    GOOGLE_LS: "qmr_ai_google_client_id",
     HIDE_TIPS_LS: "qmr_ai_hide_tips",
 
     FREQ: ["Monthly", "Quarterly", "Annually", "Biannual", "Biennially", "Each Semester"],
@@ -101,9 +99,9 @@ const QMR = {
     get_grounding(criterion) {
         try {
             const raw = localStorage.getItem(this.grounding_key(criterion));
-            return raw ? JSON.parse(raw) : { procedure: "", drive_link: "" };
+            return raw ? JSON.parse(raw) : { procedure: "" };
         } catch (e) {
-            return { procedure: "", drive_link: "" };
+            return { procedure: "" };
         }
     },
     save_grounding(criterion, g) {
@@ -158,69 +156,6 @@ const QMR = {
             data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : "";
         if (!content) throw new Error("The model returned an empty response. Try gpt-4o-mini.");
         return JSON.parse(content);
-    },
-
-    // ---- Google Drive (optional live pull of a Google Doc procedure) ----
-    get_google_client_id() {
-        const cur = localStorage.getItem(this.GOOGLE_LS) || "";
-        if (cur) return Promise.resolve(cur);
-        return new Promise((resolve) => {
-            frappe.prompt(
-                { label: "Google OAuth client id", fieldname: "cid", fieldtype: "Text", reqd: 1 },
-                (v) => {
-                    const cid = (v.cid || "").trim();
-                    localStorage.setItem(this.GOOGLE_LS, cid);
-                    resolve(cid);
-                },
-                "Google Drive access"
-            );
-        });
-    },
-    parse_drive_id(url) {
-        const s = String(url || "").trim();
-        let m = s.match(/\/(?:file|document|spreadsheets|presentation)\/d\/([a-zA-Z0-9_-]+)/);
-        if (m) return m[1];
-        m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-        if (m) return m[1];
-        m = s.match(/^([a-zA-Z0-9_-]{20,})$/);
-        if (m) return m[1];
-        return null;
-    },
-    load_gis() {
-        if (window.google && window.google.accounts && window.google.accounts.oauth2) return Promise.resolve();
-        return new Promise((resolve, reject) => {
-            const s = document.createElement("script");
-            s.src = "https://accounts.google.com/gsi/client";
-            s.async = true;
-            s.onload = () => resolve();
-            s.onerror = () => reject(new Error("Failed to load Google Identity Services."));
-            document.head.appendChild(s);
-        });
-    },
-    async drive_token(client_id) {
-        await this.load_gis();
-        return new Promise((resolve, reject) => {
-            const client = window.google.accounts.oauth2.initTokenClient({
-                client_id,
-                scope: "https://www.googleapis.com/auth/drive.readonly",
-                callback(resp) {
-                    if (resp.error || !resp.access_token) reject(new Error(resp.error || "No access token."));
-                    else resolve(resp.access_token);
-                }
-            });
-            client.requestAccessToken();
-        });
-    },
-    async drive_fetch_text(token, file_id) {
-        const auth = { Authorization: `Bearer ${token}` };
-        const meta_res = await fetch(`https://www.googleapis.com/drive/v3/files/${file_id}?fields=name,mimeType`, { headers: auth });
-        if (!meta_res.ok) throw new Error(`Drive metadata ${meta_res.status}`);
-        const meta = await meta_res.json();
-        if (meta.mimeType !== "application/vnd.google-apps.document")
-            throw new Error("Only a Google Doc can be pulled live. Paste the text for Word or PDF.");
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${file_id}/export?mimeType=text/plain`, { headers: auth });
-        if (!res.ok) throw new Error(`Drive export ${res.status}`);
-        return (await res.text()).trim();
     },
 
     // ---- prompts (grounded or refuse) ----
@@ -425,16 +360,12 @@ const QMR = {
                     default: localStorage.getItem(self.SELFCHECK_LS) !== "false" ? 1 : 0
                 },
                 { fieldtype: "Section Break" },
-                { label: "Google Doc link (optional)", fieldname: "drive_link", fieldtype: "Data", default: g.drive_link,
-                  description: "Paste a Google Doc link, then Pull from Drive to load its text into Procedure." },
-                { label: "Pull from Drive", fieldname: "pull_drive", fieldtype: "Button" },
                 { label: "Procedure / SOP text (authoritative, required to draft)", fieldname: "procedure", fieldtype: "Small Text", default: g.procedure }
             ],
             primary_action_label: "Save grounding",
             primary_action(values) {
                 self.save_grounding(criterion, {
-                    procedure: values.procedure || "",
-                    drive_link: values.drive_link || ""
+                    procedure: values.procedure || ""
                 });
                 localStorage.setItem(self.MODEL_LS, values.model || "gpt-4o-mini");
                 localStorage.setItem(self.SELFCHECK_LS, values.self_check ? "true" : "false");
@@ -465,35 +396,6 @@ const QMR = {
             }
         });
 
-        d.fields_dict.pull_drive.$input.on("click", async () => {
-            const link = d.get_value("drive_link");
-            if (!link) { frappe.msgprint("Paste a Google Doc link first."); return; }
-            const file_id = self.parse_drive_id(link);
-            if (!file_id) { frappe.msgprint("Could not read a file id from that link."); return; }
-            // Ask for the client id BEFORE showing any busy state, so the prompt
-            // is never hidden behind a disabled button or overlay.
-            let cid;
-            try {
-                cid = await self.get_google_client_id();
-            } catch (e) {
-                return;
-            }
-            if (!cid) return;
-            const $btn = d.fields_dict.pull_drive.$input;
-            const orig = $btn.text();
-            $btn.text("Pulling...").prop("disabled", true);
-            try {
-                const token = await self.drive_token(cid);
-                const text = await self.drive_fetch_text(token, file_id);
-                d.set_value("procedure", text);
-                frappe.show_alert({ message: `Pulled ${text.length} characters.`, indicator: "green" });
-            } catch (e) {
-                frappe.msgprint("Drive pull failed: " + e.message);
-            } finally {
-                $btn.text(orig).prop("disabled", false);
-            }
-        });
-
         d.show();
     },
 
@@ -502,8 +404,7 @@ const QMR = {
         return `
 <ol style="margin:0;padding-left:18px;line-height:1.7;font-size:13px;">
   <li><b>Set up once for this criterion.</b> Click <b>Grounding &amp; model</b> at the top. Paste how your
-      college actually does it (the procedure or SOP). You can also paste a Google Doc link and click
-      <b>Pull from Drive</b>. Click <b>Save grounding</b>.
+      college actually does it (the procedure or SOP), then click <b>Save grounding</b>.
       You only do this once per criterion; it is remembered on this computer.</li>
   <li><b>Say what happened.</b> If a result was below target, or nothing happened this period, type a short line
       in the record's <b>Overall Note</b> (near the top of the form) explaining why. The AI needs this so it can
