@@ -87,8 +87,17 @@ qmr_ai_draft.fetch_openai_models = async function (key) {
   const res = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: "Bearer " + key } });
   if (!res.ok) {
     const t = await res.text();
-    if (res.status === 401)
-      throw new Error("OpenAI rejected the key (401). Check it is correct and active, and pasted with no extra spaces or line breaks.");
+    if (res.status === 401) {
+      let hint = "OpenAI rejected the key (401). The key currently in the field is " + key.length + " characters. ";
+      if (key.startsWith("sk-proj-") && key.length <= 140) {
+        hint +=
+          "A project key (sk-proj-) is normally about 164 characters, so this one was truncated by the old 140-character settings field before this update. Delete the key completely, paste the full key again, Save, then retry.";
+      } else {
+        hint +=
+          "Check the key is copied in full and active (not revoked), that its project has billing set up, and that a restricted key has read access to the Models endpoint.";
+      }
+      throw new Error(hint);
+    }
     throw new Error("HTTP " + res.status + ": " + t.slice(0, 120));
   }
   const data = await res.json();
