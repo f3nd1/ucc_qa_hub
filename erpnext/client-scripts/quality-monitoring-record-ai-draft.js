@@ -72,7 +72,9 @@ qmr_ai_draft.LS = {
 
 qmr_ai_draft.get_settings = function () {
   return {
-    openai_key: localStorage.getItem(qmr_ai_draft.LS.openai_key) || "",
+    // Trim: a Small Text paste can carry a trailing space or newline, which
+    // OpenAI reads as part of the key and rejects with a 401.
+    openai_key: (localStorage.getItem(qmr_ai_draft.LS.openai_key) || "").trim(),
     openai_model: localStorage.getItem(qmr_ai_draft.LS.openai_model) || "gpt-4o-mini",
     self_check: localStorage.getItem(qmr_ai_draft.LS.self_check) !== "false",
     google_client_id: localStorage.getItem(qmr_ai_draft.LS.google_client_id) || "",
@@ -81,9 +83,12 @@ qmr_ai_draft.get_settings = function () {
 
 /** OpenAI's chat-capable models, for the Fetch models button. */
 qmr_ai_draft.fetch_openai_models = async function (key) {
+  key = String(key || "").trim();
   const res = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: "Bearer " + key } });
   if (!res.ok) {
     const t = await res.text();
+    if (res.status === 401)
+      throw new Error("OpenAI rejected the key (401). Check it is correct and active, and pasted with no extra spaces or line breaks.");
     throw new Error("HTTP " + res.status + ": " + t.slice(0, 120));
   }
   const data = await res.json();
@@ -158,7 +163,7 @@ qmr_ai_draft.open_settings = function () {
     ],
     primary_action_label: "Save",
     primary_action(values) {
-      localStorage.setItem(qmr_ai_draft.LS.openai_key, values.openai_key || "");
+      localStorage.setItem(qmr_ai_draft.LS.openai_key, (values.openai_key || "").trim());
       localStorage.setItem(qmr_ai_draft.LS.openai_model, values.openai_model || "gpt-4o-mini");
       localStorage.setItem(qmr_ai_draft.LS.self_check, values.self_check ? "true" : "false");
       localStorage.setItem(qmr_ai_draft.LS.google_client_id, values.google_client_id || "");
@@ -372,7 +377,7 @@ qmr_ai_draft.SELFCHECK_PROMPT = [
 qmr_ai_draft.call_openai = async function (settings, messages) {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " + settings.openai_key },
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + String(settings.openai_key || "").trim() },
     body: JSON.stringify({
       model: settings.openai_model,
       temperature: 0.15,
@@ -382,6 +387,7 @@ qmr_ai_draft.call_openai = async function (settings, messages) {
   });
   if (!res.ok) {
     const t = await res.text();
+    if (res.status === 401) throw new Error("OpenAI rejected the key (401). Check it in AI Draft > Settings.");
     throw new Error("OpenAI HTTP " + res.status + ": " + t.slice(0, 180));
   }
   const data = await res.json();
