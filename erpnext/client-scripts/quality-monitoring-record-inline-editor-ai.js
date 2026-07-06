@@ -16,10 +16,10 @@
 // Keep the "Childtable Clone" (template) script as it is.
 //
 // Grounding, and the rule that must not be weakened:
-//   - Each draft is grounded in this criterion's GD4 requirement and UCC
-//     procedure. Click "Grounding & model" once per criterion to paste them
-//     (or pull the procedure from a Google Doc link). They are cached in
-//     this browser per criterion.
+//   - Each draft is grounded in this criterion's UCC procedure. Click
+//     "Grounding & model" once per criterion to paste it (or pull the
+//     procedure from a Google Doc link). It is cached in this browser
+//     per criterion.
 //   - No procedure means it will not draft. If an activity has no concrete
 //     basis (for example a shortfall with no Overall Note explaining the
 //     cause), that activity refuses and asks a question instead of inventing.
@@ -101,9 +101,9 @@ const QMR = {
     get_grounding(criterion) {
         try {
             const raw = localStorage.getItem(this.grounding_key(criterion));
-            return raw ? JSON.parse(raw) : { requirement: "", procedure: "", drive_link: "" };
+            return raw ? JSON.parse(raw) : { procedure: "", drive_link: "" };
         } catch (e) {
-            return { requirement: "", procedure: "", drive_link: "" };
+            return { procedure: "", drive_link: "" };
         }
     },
     save_grounding(criterion, g) {
@@ -234,10 +234,9 @@ const QMR = {
         return [
             "You draft KPI Target Description (only if it is blank), Evaluation Text and Improvement Action for a Quality Monitoring Record activity at United Ceres College (UCC), a Singapore private education institution preparing for an EduTrust audit.",
             "",
-            "You are given, in priority order: the GD4 REQUIREMENT for this criterion, the PROCEDURE (how UCC does it, authoritative for steps and evidence), the activity details, the KPI target and actual, and an OVERALL NOTE describing what happened this period.",
+            "You are given, in priority order: the PROCEDURE (how UCC does it, authoritative for steps and evidence), the activity details, the KPI target and actual, and an OVERALL NOTE describing what happened this period.",
             "",
             "GROUNDING RULES (critical):",
-            "- Read the GD4 REQUIREMENT first. Show it is satisfied through the procedure. Do not quote it verbatim.",
             "- Your draft must be consistent with the PROCEDURE: reference its actual steps, evidence types and responsibilities. Do not describe generic controls the procedure does not mention.",
             "- Every specific claim must be supported by the KPI actual or the OVERALL NOTE. Do not invent events, numbers, dates, names or evidence.",
             "- If the inputs do not give a concrete basis (for example a shortfall with no note explaining the cause), do not guess. Refuse instead.",
@@ -298,7 +297,6 @@ const QMR = {
 
         const needs_target_desc = !String(row.kpi_target_desc || "").trim();
         const payload = {
-            gd4_requirement: g.requirement || "(none supplied)",
             procedure: g.procedure,
             pattern: this.detect_pattern(row),
             criterion,
@@ -427,7 +425,6 @@ const QMR = {
                     default: localStorage.getItem(self.SELFCHECK_LS) !== "false" ? 1 : 0
                 },
                 { fieldtype: "Section Break" },
-                { label: "GD4 requirement (what EduTrust expects)", fieldname: "requirement", fieldtype: "Small Text", default: g.requirement },
                 { label: "Google Doc link (optional)", fieldname: "drive_link", fieldtype: "Data", default: g.drive_link,
                   description: "Paste a Google Doc link, then Pull from Drive to load its text into Procedure." },
                 { label: "Pull from Drive", fieldname: "pull_drive", fieldtype: "Button" },
@@ -436,7 +433,6 @@ const QMR = {
             primary_action_label: "Save grounding",
             primary_action(values) {
                 self.save_grounding(criterion, {
-                    requirement: values.requirement || "",
                     procedure: values.procedure || "",
                     drive_link: values.drive_link || ""
                 });
@@ -451,7 +447,9 @@ const QMR = {
         d.fields_dict.fetch_models.$input.on("click", async () => {
             const key = await self.get_key();
             if (!key) return;
-            frappe.dom.freeze("Fetching models...");
+            const $btn = d.fields_dict.fetch_models.$input;
+            const orig = $btn.text();
+            $btn.text("Fetching...").prop("disabled", true);
             try {
                 const list = await self.fetch_models(key);
                 if (!list.length) throw new Error("No chat models returned.");
@@ -463,18 +461,28 @@ const QMR = {
             } catch (e) {
                 frappe.msgprint("Could not fetch models: " + e.message);
             } finally {
-                frappe.dom.unfreeze();
+                $btn.text(orig).prop("disabled", false);
             }
         });
 
         d.fields_dict.pull_drive.$input.on("click", async () => {
             const link = d.get_value("drive_link");
             if (!link) { frappe.msgprint("Paste a Google Doc link first."); return; }
-            frappe.dom.freeze("Pulling from Drive...");
+            const file_id = self.parse_drive_id(link);
+            if (!file_id) { frappe.msgprint("Could not read a file id from that link."); return; }
+            // Ask for the client id BEFORE showing any busy state, so the prompt
+            // is never hidden behind a disabled button or overlay.
+            let cid;
             try {
-                const file_id = self.parse_drive_id(link);
-                if (!file_id) throw new Error("Could not read a file id from that link.");
-                const cid = await self.get_google_client_id();
+                cid = await self.get_google_client_id();
+            } catch (e) {
+                return;
+            }
+            if (!cid) return;
+            const $btn = d.fields_dict.pull_drive.$input;
+            const orig = $btn.text();
+            $btn.text("Pulling...").prop("disabled", true);
+            try {
                 const token = await self.drive_token(cid);
                 const text = await self.drive_fetch_text(token, file_id);
                 d.set_value("procedure", text);
@@ -482,7 +490,7 @@ const QMR = {
             } catch (e) {
                 frappe.msgprint("Drive pull failed: " + e.message);
             } finally {
-                frappe.dom.unfreeze();
+                $btn.text(orig).prop("disabled", false);
             }
         });
 
@@ -493,9 +501,9 @@ const QMR = {
     steps_html() {
         return `
 <ol style="margin:0;padding-left:18px;line-height:1.7;font-size:13px;">
-  <li><b>Set up once for this criterion.</b> Click <b>Grounding &amp; model</b> at the top. Paste two things:
-      what the audit expects (the GD4 requirement) and how your college actually does it (the procedure or SOP).
-      You can also paste a Google Doc link and click <b>Pull from Drive</b>. Click <b>Save grounding</b>.
+  <li><b>Set up once for this criterion.</b> Click <b>Grounding &amp; model</b> at the top. Paste how your
+      college actually does it (the procedure or SOP). You can also paste a Google Doc link and click
+      <b>Pull from Drive</b>. Click <b>Save grounding</b>.
       You only do this once per criterion; it is remembered on this computer.</li>
   <li><b>Say what happened.</b> If a result was below target, or nothing happened this period, type a short line
       in the record's <b>Overall Note</b> (near the top of the form) explaining why. The AI needs this so it can
@@ -538,7 +546,7 @@ const QMR = {
     <button class="qmr-btn" data-hidetips style="margin-left:auto;">Got it, hide this</button>
   </div>
   <ol style="margin:0;padding-left:18px;line-height:1.6;">
-    <li><b>Grounding &amp; model</b> (top): paste the audit requirement and your procedure once per criterion.</li>
+    <li><b>Grounding &amp; model</b> (top): paste your procedure once per criterion.</li>
     <li>Type a short line in <b>Overall Note</b> if a target was missed or nothing happened.</li>
     <li>Click <b>Draft</b> on a card (or <b>Draft all empty</b>), then review and <b>Save</b>.</li>
   </ol>
