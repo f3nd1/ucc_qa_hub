@@ -510,8 +510,22 @@ const QMR = {
       or numbers.</li>
 </ol>`;
     },
-    how_to() {
-        const d = new frappe.ui.Dialog({ title: "How to use AI Draft", size: "large" });
+    how_to(frm) {
+        const self = this;
+        const hidden = localStorage.getItem(this.HIDE_TIPS_LS) === "true";
+        const d = new frappe.ui.Dialog({
+            title: "How to use AI Draft",
+            size: "large",
+            primary_action_label: hidden ? "Show the blue tip box again" : "Close",
+            primary_action() {
+                if (hidden) {
+                    localStorage.removeItem(self.HIDE_TIPS_LS);
+                    if (frm) self.render(frm);
+                    frappe.show_alert({ message: "The tip box is back at the top of the form.", indicator: "green" });
+                }
+                d.hide();
+            }
+        });
         d.$body.html(this.steps_html());
         d.show();
     },
@@ -639,7 +653,7 @@ const QMR = {
 
         wrapper.off("click.qmr").on("click.qmr", "[data-draft],[data-draftall],[data-grounding],[data-howto],[data-hidetips]", async function (e) {
             const $b = $(this);
-            if ($b.is("[data-howto]")) { e.preventDefault(); self.how_to(); return; }
+            if ($b.is("[data-howto]")) { e.preventDefault(); self.how_to(frm); return; }
             if ($b.is("[data-hidetips]")) { localStorage.setItem(self.HIDE_TIPS_LS, "true"); self.render(frm); return; }
             if ($b.is("[data-grounding]")) { self.open_grounding(frm); return; }
             if ($b.is("[data-draftall]")) { self.draft_all_empty(frm); return; }
