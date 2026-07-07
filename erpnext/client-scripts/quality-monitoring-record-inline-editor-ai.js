@@ -836,12 +836,21 @@ const QMR = {
         const self = this;
         const getRow = (idx) => (frm.doc.items || []).find((r) => String(r.idx) === String(idx));
 
-        wrapper.off("change.qmr").on("change.qmr", "input, select, textarea", function () {
+        // Commit on "input" (every keystroke), not just "change" (which only fires
+        // on blur). Otherwise, a re-render triggered elsewhere (e.g. clicking
+        // Draft on a different card, which redraws the whole card list once it
+        // finishes) while you are still mid-edit and have not yet clicked away
+        // would rebuild the DOM from the old, not-yet-committed in-memory value,
+        // making your edit appear to silently revert.
+        wrapper.off("input.qmr change.qmr").on("input.qmr change.qmr", "input, select, textarea", function () {
             const idx = $(this).data("idx"), fn = $(this).data("fn");
             const row = getRow(idx);
             if (!row || !fn) return;
             let val = $(this).val();
-            if (fn === "kpi_target_value" || fn === "kpi_actual_value") val = val === "" ? null : parseFloat(val);
+            if (fn === "kpi_target_value" || fn === "kpi_actual_value") {
+                val = val === "" ? null : parseFloat(val);
+                if (typeof val === "number" && Number.isNaN(val)) return;
+            }
             row[fn] = val;
             frm.dirty();
         });
