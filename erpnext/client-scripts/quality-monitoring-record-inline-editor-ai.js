@@ -84,14 +84,22 @@ const QMR = {
         window._qmrKey = null;
         sessionStorage.removeItem(this.KEY_SS);
     },
+    // Strip ALL whitespace, not just leading/trailing: API keys never legitimately
+    // contain whitespace, and a stray newline (easy to embed by accident in a
+    // multi-line Text field, e.g. an extra Enter or a paste with a line break)
+    // makes fetch() throw "Invalid value" when it is used in an Authorization
+    // header, since header values cannot contain control characters.
+    clean_key(v) {
+        return String(v || "").replace(/\s+/g, "");
+    },
     get_key() {
-        if (!window._qmrKey) window._qmrKey = sessionStorage.getItem(this.KEY_SS);
+        if (!window._qmrKey) window._qmrKey = this.clean_key(sessionStorage.getItem(this.KEY_SS));
         if (window._qmrKey) return Promise.resolve(window._qmrKey);
         return new Promise((resolve) => {
             frappe.prompt(
                 { label: "OpenAI API Key", fieldname: "key", fieldtype: "Text", reqd: 1 },
                 (v) => {
-                    window._qmrKey = (v.key || "").trim();
+                    window._qmrKey = this.clean_key(v.key);
                     sessionStorage.setItem(this.KEY_SS, window._qmrKey);
                     resolve(window._qmrKey);
                 },
@@ -145,7 +153,7 @@ const QMR = {
     // ---- OpenAI ----
     async fetch_models(key) {
         const res = await fetch("https://api.openai.com/v1/models", {
-            headers: { Authorization: `Bearer ${String(key || "").trim()}` }
+            headers: { Authorization: `Bearer ${this.clean_key(key)}` }
         });
         if (!res.ok) {
             if (res.status === 401) this.clear_key();
@@ -171,7 +179,7 @@ const QMR = {
         }
         const res = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
-            headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+            headers: { Authorization: `Bearer ${this.clean_key(key)}`, "Content-Type": "application/json" },
             body: JSON.stringify(body)
         });
         if (!res.ok) {
@@ -293,6 +301,15 @@ const QMR = {
             if (e.status === 401) {
                 frappe.msgprint("OpenAI rejected the key (401). It has been cleared. Try again to re-enter it.");
                 return "401";
+            }
+            if (/Invalid value/.test(e.message || "")) {
+                this.clear_key();
+                if (!opts.silent)
+                    frappe.msgprint(
+                        "Your OpenAI key had a stray space or line break in it, which the browser rejects. " +
+                        "It has been cleared; click Draft again and re-enter it on one line."
+                    );
+                return "error";
             }
             if (!opts.silent) frappe.msgprint("AI draft failed: " + e.message);
             return "error";
