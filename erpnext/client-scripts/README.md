@@ -19,13 +19,34 @@ cards (as before) and adds:
 The Draft buttons fill the activity's **KPI Target Description** (only if blank),
 **Evaluation Text** and **Improvement Action**.
 
+## Procedure source
+
+The procedure/SOP text is **not** pasted or stored in the browser any more. It
+is read live from the **Quality Procedure** DocType:
+
+- The Quality Procedure record whose **`custom_criterion_reference`** field
+  equals the Quality Monitoring Record's **Criterion** is the match.
+- Its **`custom_ppd_text_format`** field is the authoritative procedure text
+  used for grounding.
+- If no Quality Procedure record matches a criterion, drafting is blocked for
+  every activity under that criterion until one is created.
+
+This makes the procedure a single, shared, governed source of truth (with
+Frappe's normal permissions, ownership and version history) instead of a
+per-browser paste that could drift between reviewers.
+
+Anyone using this must have **read** permission on Quality Procedure, or the
+lookup will silently return no match and drafting will refuse for that
+criterion.
+
 ## Set-up on the form
 
-1. Open a Quality Monitoring Record. Click **Grounding & model** (top toolbar).
-2. For this record's Criterion, paste the **Procedure/SOP** text. This is
-   cached in your browser per criterion, so you only do it once per criterion.
-   Optionally click **Fetch available models** to pick the OpenAI model. Save
-   grounding.
+1. Open a Quality Monitoring Record. Click **Grounding & model** (top toolbar)
+   to confirm the matching Quality Procedure record was found and see its text.
+   Use **Refresh from Quality Procedure** if you just edited that record, or
+   **Open/Create Quality Procedure record** if none matches yet.
+2. Optionally click **Fetch available models** to pick the OpenAI model, then
+   **Save model settings**.
 3. Click **Draft** on a card (or **Draft all empty**). The first time, it asks
    for your OpenAI API key; it is held for the browser session only and cleared
    automatically if OpenAI rejects it.
@@ -34,7 +55,7 @@ The Draft buttons fill the activity's **KPI Target Description** (only if blank)
 
 ## Rules kept (do not weaken)
 
-- No procedure loaded for the criterion means it will not draft.
+- No matching Quality Procedure record for the criterion means it will not draft.
 - If an activity has no concrete basis (for example a shortfall with no Overall
   Note explaining the cause), that activity refuses and asks a specific question
   instead of inventing text.

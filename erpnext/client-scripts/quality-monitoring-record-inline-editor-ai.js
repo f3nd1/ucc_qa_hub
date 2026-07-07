@@ -16,12 +16,15 @@
 // Keep the "Childtable Clone" (template) script as it is.
 //
 // Grounding, and the rule that must not be weakened:
-//   - Each draft is grounded in this criterion's UCC procedure. Click
-//     "Grounding & model" once per criterion to paste it. It is cached in
-//     this browser per criterion.
-//   - No procedure means it will not draft. If an activity has no concrete
-//     basis (for example a shortfall with no Overall Note explaining the
-//     cause), that activity refuses and asks a question instead of inventing.
+//   - Each draft is grounded in this criterion's UCC procedure, read live from
+//     the "Quality Procedure" DocType: the record whose custom_criterion_reference
+//     equals this record's Criterion, using its custom_ppd_text_format field as
+//     the authoritative SOP text. Click "Grounding & model" to check it, or to
+//     open/create that record if none matches.
+//   - No matching Quality Procedure record means it will not draft. If an
+//     activity has no concrete basis (for example a shortfall with no Overall
+//     Note explaining the cause), that activity refuses and asks a question
+//     instead of inventing.
 //   - The API key is entered once per browser session (not stored in a
 //     form field) and cleared automatically if OpenAI rejects it.
 //   - Nothing is auto-saved. Review the drafts, then Save the form.
@@ -42,6 +45,11 @@ const QMR = {
     MODEL_LS: "qmr_ai_model",
     SELFCHECK_LS: "qmr_ai_self_check",
     HIDE_TIPS_LS: "qmr_ai_hide_tips",
+
+    PROC_DOCTYPE: "Quality Procedure",
+    PROC_MATCH_FIELD: "custom_criterion_reference",
+    PROC_TEXT_FIELD: "custom_ppd_text_format",
+    _procCache: {},
 
     FREQ: ["Monthly", "Quarterly", "Annually", "Biannual", "Biennially", "Each Semester"],
     TIMING: ["Department Meeting", "Management Review", "Quarterly Review", "Annual Audit"],
@@ -92,20 +100,29 @@ const QMR = {
         });
     },
 
-    // ---- grounding, cached per criterion ----
-    grounding_key(criterion) {
-        return "qmr_ai_grounding_" + criterion;
-    },
-    get_grounding(criterion) {
+    // ---- procedure: fetched live from the Quality Procedure DocType ----
+    // Matched by PROC_MATCH_FIELD (custom_criterion_reference) = this record's
+    // Criterion; the authoritative SOP text is PROC_TEXT_FIELD (custom_ppd_text_format).
+    // Cached in memory only for this page load, not localStorage, so every
+    // fresh visit reads the current, single, shared source of truth.
+    async get_procedure(criterion, opts) {
+        opts = opts || {};
+        if (!opts.refresh && this._procCache[criterion]) return this._procCache[criterion];
+        let result = { text: "", name: null };
         try {
-            const raw = localStorage.getItem(this.grounding_key(criterion));
-            return raw ? JSON.parse(raw) : { procedure: "" };
+            const list = await frappe.db.get_list(this.PROC_DOCTYPE, {
+                filters: { [this.PROC_MATCH_FIELD]: criterion },
+                fields: ["name", this.PROC_TEXT_FIELD],
+                limit: 1
+            });
+            if (list && list.length) {
+                result = { text: this.strip(list[0][this.PROC_TEXT_FIELD] || ""), name: list[0].name };
+            }
         } catch (e) {
-            return { procedure: "" };
+            console.warn("Could not load Quality Procedure:", e.message);
         }
-    },
-    save_grounding(criterion, g) {
-        localStorage.setItem(this.grounding_key(criterion), JSON.stringify(g));
+        this._procCache[criterion] = result;
+        return result;
     },
 
     // ---- OpenAI ----
@@ -214,10 +231,13 @@ const QMR = {
             if (!opts.silent) frappe.msgprint("This record has no Criterion set.");
             return "error";
         }
-        const g = this.get_grounding(criterion);
-        if (!String(g.procedure || "").trim()) {
+        const proc = await this.get_procedure(criterion);
+        if (!proc.text) {
             if (!opts.silent) {
-                frappe.msgprint("No procedure set for " + criterion + ". Click 'Grounding & model' first.");
+                frappe.msgprint(
+                    "No Quality Procedure record found for criterion '" + criterion +
+                    "'. Click 'Grounding & model' to check or create one."
+                );
                 this.open_grounding(frm);
             }
             return "no-proc";
@@ -232,7 +252,7 @@ const QMR = {
 
         const needs_target_desc = !String(row.kpi_target_desc || "").trim();
         const payload = {
-            procedure: g.procedure,
+            procedure: proc.text,
             pattern: this.detect_pattern(row),
             criterion,
             department: frm.doc.department,
@@ -313,8 +333,12 @@ const QMR = {
         // Fail fast on the two things that would otherwise freeze then error.
         const criterion = frm.doc.criterion;
         if (!criterion) { frappe.msgprint("This record has no Criterion set."); return; }
-        if (!String(this.get_grounding(criterion).procedure || "").trim()) {
-            frappe.msgprint("No procedure set for " + criterion + ". Click 'Grounding & model' first.");
+        const proc = await this.get_procedure(criterion);
+        if (!proc.text) {
+            frappe.msgprint(
+                "No Quality Procedure record found for criterion '" + criterion +
+                "'. Click 'Grounding & model' to check or create one."
+            );
             this.open_grounding(frm);
             return;
         }
@@ -415,18 +439,18 @@ const QMR = {
     },
 
     // ---- grounding & model dialog ----
-    open_grounding(frm) {
+    async open_grounding(frm) {
         const criterion = frm.doc.criterion;
         if (!criterion) {
             frappe.msgprint("This record has no Criterion set.");
             return;
         }
-        const g = this.get_grounding(criterion);
         const self = this;
         const preset = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-5.4", "gpt-5.4-pro"];
         const saved_model = this.get_model();
         if (!preset.includes(saved_model)) preset.unshift(saved_model);
         const model_options = window._qmrModels && window._qmrModels.length ? window._qmrModels : preset;
+        const proc = await this.get_procedure(criterion);
 
         const d = new frappe.ui.Dialog({
             title: "Grounding & model for " + criterion,
@@ -439,18 +463,21 @@ const QMR = {
                     fieldname: "self_check", fieldtype: "Check",
                     default: localStorage.getItem(self.SELFCHECK_LS) !== "false" ? 1 : 0
                 },
-                { fieldtype: "Section Break" },
-                { label: "Procedure / SOP text (authoritative, required to draft)", fieldname: "procedure", fieldtype: "Small Text", default: g.procedure }
+                { fieldtype: "Section Break", label: "Procedure (from Quality Procedure)" },
+                {
+                    label: proc.name ? "Loaded from Quality Procedure " + proc.name : "No matching Quality Procedure record",
+                    fieldname: "procedure", fieldtype: "Small Text", read_only: 1,
+                    default: proc.text || "(none found for this criterion)"
+                },
+                { label: "Refresh from Quality Procedure", fieldname: "refresh_proc", fieldtype: "Button" },
+                { label: proc.name ? "Open Quality Procedure record" : "Create Quality Procedure record", fieldname: "open_proc", fieldtype: "Button" }
             ],
-            primary_action_label: "Save grounding",
+            primary_action_label: "Save model settings",
             primary_action(values) {
-                self.save_grounding(criterion, {
-                    procedure: values.procedure || ""
-                });
                 localStorage.setItem(self.MODEL_LS, values.model || "gpt-4o-mini");
                 localStorage.setItem(self.SELFCHECK_LS, values.self_check ? "true" : "false");
                 d.hide();
-                frappe.show_alert({ message: "Grounding saved for " + criterion + ".", indicator: "green" });
+                frappe.show_alert({ message: "Model settings saved.", indicator: "green" });
                 self.render(frm);
             }
         });
@@ -476,6 +503,35 @@ const QMR = {
             }
         });
 
+        d.fields_dict.refresh_proc.$input.on("click", async () => {
+            const $btn = d.fields_dict.refresh_proc.$input;
+            const orig = $btn.text();
+            $btn.text("Refreshing...").prop("disabled", true);
+            try {
+                const fresh = await self.get_procedure(criterion, { refresh: true });
+                d.set_value("procedure", fresh.text || "(none found for this criterion)");
+                d.set_df_property(
+                    "procedure", "label",
+                    fresh.name ? "Loaded from Quality Procedure " + fresh.name : "No matching Quality Procedure record"
+                );
+                d.set_df_property("open_proc", "label", fresh.name ? "Open Quality Procedure record" : "Create Quality Procedure record");
+                frappe.show_alert({ message: fresh.text ? "Procedure refreshed." : "Still no matching record.", indicator: fresh.text ? "green" : "orange" });
+                self.render(frm);
+            } finally {
+                $btn.text(orig).prop("disabled", false);
+            }
+        });
+
+        d.fields_dict.open_proc.$input.on("click", () => {
+            d.hide();
+            const latest = self._procCache[criterion];
+            if (latest && latest.name) {
+                frappe.set_route("Form", self.PROC_DOCTYPE, latest.name);
+            } else {
+                frappe.new_doc(self.PROC_DOCTYPE, { [self.PROC_MATCH_FIELD]: criterion });
+            }
+        });
+
         d.show();
     },
 
@@ -483,9 +539,9 @@ const QMR = {
     steps_html() {
         return `
 <ol style="margin:0;padding-left:18px;line-height:1.7;font-size:13px;">
-  <li><b>Set up once for this criterion.</b> Click <b>Grounding &amp; model</b> at the top. Paste how your
-      college actually does it (the procedure or SOP), then click <b>Save grounding</b>.
-      You only do this once per criterion; it is remembered on this computer.</li>
+  <li><b>Make sure the procedure exists.</b> The procedure text comes automatically from the <b>Quality
+      Procedure</b> record for this criterion. Click <b>Grounding &amp; model</b> to check it is loaded, or to
+      open/create that record if it is missing. There is nothing to paste here any more.</li>
   <li><b>Say what happened.</b> If a result was below target, or nothing happened this period, type a short line
       in the record's <b>Overall Note</b> (near the top of the form) explaining why. The AI needs this so it can
       be honest rather than guess.</li>
@@ -527,7 +583,7 @@ const QMR = {
     <button class="qmr-btn" data-hidetips style="margin-left:auto;">Got it, hide this</button>
   </div>
   <ol style="margin:0;padding-left:18px;line-height:1.6;">
-    <li><b>Grounding &amp; model</b> (top): paste your procedure once per criterion.</li>
+    <li><b>Grounding &amp; model</b> (top): confirm the Quality Procedure record for this criterion is loaded.</li>
     <li>Type a short line in <b>Overall Note</b> if a target was missed or nothing happened.</li>
     <li>Click <b>Draft</b> on a card (or <b>Draft all empty</b>), then review and <b>Save</b>.</li>
   </ol>
@@ -536,11 +592,12 @@ const QMR = {
     },
 
     // ---- render the inline editor with per-card Draft buttons ----
-    render(frm) {
+    async render(frm) {
         const wrapper = frm.fields_dict.qmr_inline_editor.$wrapper;
         const items = frm.doc.items || [];
         const criterion = frm.doc.criterion || "";
-        const has_proc = criterion && !!String(this.get_grounding(criterion).procedure || "").trim();
+        const proc = criterion ? await this.get_procedure(criterion) : { text: "", name: null };
+        const has_proc = !!proc.text;
         const self = this;
 
         const css = `
@@ -574,10 +631,10 @@ const QMR = {
         const toolbar = `
 <div class="qmr-toolbar">
   <button class="qmr-btn primary" data-draftall title="Fill Evaluation Text and Improvement Action for every activity that is still blank in this record.">Draft all empty</button>
-  <button class="qmr-btn" data-grounding title="Set, once per criterion, what the audit expects and how your college does it. The AI writes only from this, so it stays honest.">Grounding &amp; model</button>
+  <button class="qmr-btn" data-grounding title="Check the procedure loaded from the Quality Procedure record for this criterion, and pick the AI model. The AI writes only from that procedure, so it stays honest.">Grounding &amp; model</button>
   <button class="qmr-btn" data-howto title="A short step by step, in plain language.">How to use</button>
-  <span class="qmr-ground ${has_proc ? "qmr-ground-ok" : "qmr-ground-no"}" title="${has_proc ? "A procedure is set for this criterion, so drafting is allowed." : "No procedure set yet. Click Grounding and model to add one before drafting."}">
-    ${criterion ? (has_proc ? "Procedure loaded for " + this.esc(criterion) : "No procedure for " + this.esc(criterion) + " (drafting is blocked)") : "No Criterion on this record"}
+  <span class="qmr-ground ${has_proc ? "qmr-ground-ok" : "qmr-ground-no"}" title="${has_proc ? "A matching Quality Procedure record was found for this criterion, so drafting is allowed." : "No Quality Procedure record found for this criterion. Click Grounding and model to check or create one before drafting."}">
+    ${criterion ? (has_proc ? "Procedure loaded for " + this.esc(criterion) : "No Quality Procedure for " + this.esc(criterion) + " (drafting is blocked)") : "No Criterion on this record"}
   </span>
   <span class="qmr-muted">Model: ${this.esc(this.get_model())}</span>
 </div>`;
