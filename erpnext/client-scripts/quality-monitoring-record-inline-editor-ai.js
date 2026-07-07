@@ -299,12 +299,10 @@ const QMR = {
         }
 
         if (out.status === "need_input") {
-            if (!opts.silent)
-                frappe.msgprint({
-                    title: "Needs your input: " + this.esc(row.activity_name || row.idx),
-                    message: this.esc(out.question || "Needs more information."),
-                    indicator: "orange"
-                });
+            // No msgprint here: the caller decides how to present this. The
+            // per-card Draft button opens an answer dialog (see wire()); the bulk
+            // "Draft all empty" run just logs it and lets the user resolve it
+            // afterwards from the card.
             return { status: "need_input", question: out.question };
         }
 
@@ -331,6 +329,42 @@ const QMR = {
         if (row.review_status === "Reviewed") row.review_status = "Under Review";
         frm.dirty();
         return "ok";
+    },
+
+    // ---- answer box for a "need_input" refusal, then redraft that activity ----
+    answer_need_input(frm, idx, activity_name, question) {
+        const self = this;
+        const d = new frappe.ui.Dialog({
+            title: "Needs your input: " + (activity_name || "activity #" + idx),
+            fields: [
+                {
+                    fieldtype: "HTML", fieldname: "q_html",
+                    options: `<div style="margin-bottom:10px;color:#1a3b6e;">${this.esc(question || "Needs more information.")}</div>`
+                },
+                { label: "Your answer", fieldname: "answer", fieldtype: "Small Text", reqd: 1 }
+            ],
+            primary_action_label: "Add to Overall Note and redraft",
+            async primary_action(values) {
+                const answer = String(values.answer || "").trim();
+                if (!answer) return;
+                d.get_primary_btn().prop("disabled", true).text("Redrafting...");
+                const prefix = activity_name ? "[" + activity_name + "] " : "";
+                const existing = String(frm.doc.overall_note || "").trim();
+                const updated = existing ? existing + "\n" + prefix + answer : prefix + answer;
+                await frm.set_value("overall_note", updated);
+                d.hide();
+                frappe.show_alert({ message: "Added to Overall Note. Redrafting...", indicator: "blue" });
+                const r = await self.draft_row(frm, idx);
+                self.render(frm);
+                if (r === "ok") {
+                    frappe.show_alert({ message: "Drafted " + (activity_name || "the activity") + ". Review, then Save.", indicator: "green" });
+                } else if (r && r.status === "need_input") {
+                    self.answer_need_input(frm, idx, activity_name, r.question);
+                }
+                // "error" and "401" cases already msgprint from inside draft_row.
+            }
+        });
+        d.show();
     },
 
     async draft_all_empty(frm) {
@@ -383,7 +417,7 @@ const QMR = {
                 summary +=
                     " <b>Needs your input:</b><ul style='margin:6px 0 0;padding-left:18px;'>" +
                     skipped.map((s) => `<li><b>${this.esc(s.a)}:</b> ${this.esc(s.q)}</li>`).join("") +
-                    "</ul>";
+                    "</ul><div style='margin-top:4px;'>Click <b>Draft</b> on each of those cards to answer and redraft it.</div>";
             summary += "<div style='margin-top:6px;'>Nothing is saved yet. Review, then Save.</div>";
             prog.finish(summary, skipped.length ? "orange" : "green");
         }
@@ -561,9 +595,9 @@ const QMR = {
       browser session).</li>
   <li><b>Check, then save.</b> Read what it wrote in the Evaluation Text and Improvement Action boxes, edit anything
       you want, then click <b>Save</b>. Nothing is saved until you do.</li>
-  <li><b>If it asks a question instead of writing:</b> that means it did not have enough to go on. Add the missing
-      detail (usually to the Overall Note, or the procedure) and draft again. It will never make up facts, dates,
-      or numbers.</li>
+  <li><b>If it asks a question instead of writing:</b> that means it did not have enough to go on. A box appears
+      with the question and a place to type your answer; submitting it adds your answer to the record's Overall
+      Note and drafts that activity again automatically. It will never make up facts, dates, or numbers.</li>
 </ol>`;
     },
     how_to(frm) {
@@ -726,6 +760,10 @@ const QMR = {
             try {
                 const r = await self.draft_row(frm, idx);
                 if (r === "ok") { self.render(frm); frappe.show_alert({ message: "Drafted activity #" + idx + ". Review, then Save.", indicator: "blue" }); }
+                else if (r && r.status === "need_input") {
+                    const row = getRow(idx);
+                    self.answer_need_input(frm, idx, row && row.activity_name, r.question);
+                }
             } finally {
                 $b.text(label).prop("disabled", false);
             }
