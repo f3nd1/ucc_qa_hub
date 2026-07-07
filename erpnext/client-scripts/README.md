@@ -53,12 +53,29 @@ criterion.
 4. Review the drafted text in the cards, then **Save** the form. Nothing is
    auto-saved.
 
+## Overall Note is shared, but scoped per activity
+
+The DocType has one **Overall Note** field for the whole record, but each
+activity can need its own separate explanation. To keep one activity's answer
+from being read as grounding for a different activity:
+
+- A line starting with `[Activity Name]` is used only when drafting that
+  activity. The **Needs your input** answer dialog tags your answer this way
+  automatically.
+- A line with no `[...]` tag is treated as a general remark and is visible to
+  every activity.
+- When drafting activity A, anything tagged `[Activity B]` is left out
+  entirely, so A's draft is never grounded in an explanation that was actually
+  about B.
+
 ## Rules kept (do not weaken)
 
 - No matching Quality Procedure record for the criterion means it will not draft.
-- If an activity has no concrete basis (for example a shortfall with no Overall
-  Note explaining the cause), that activity refuses and asks a specific question
-  instead of inventing text.
+- If an activity has no concrete basis (for example a shortfall, or an actual
+  value of 0, with no note explaining the cause), that activity refuses and
+  asks a specific question instead of inventing text. An actual of 0 against a
+  positive target is never assumed to be benign; it needs the same note-backed
+  explanation as any other shortfall.
 
 ## Other scripts on this DocType
 

@@ -194,6 +194,36 @@ const QMR = {
               "'. Click 'Grounding & model' to check or create one.";
     },
 
+    // ---- scope the one shared Overall Note field to a single activity ----
+    // The DocType only has one record-level Overall Note, but each activity
+    // can need its own separate explanation. ask_and_redraft() tags each
+    // answer with "[Activity Name] ..." on its own line. This splits that
+    // field back apart at draft time: an activity only ever sees lines
+    // tagged for it, plus any untagged lines (genuinely record-wide remarks
+    // typed directly into the field, not through the answer dialog) - never
+    // another activity's tagged answer.
+    activity_note_for(frm, activity_name) {
+        const raw = String(frm.doc.overall_note || "");
+        if (!raw.trim()) return "";
+        const tagRe = /^\[([^\]]+)\]\s*/;
+        const mine = [];
+        const general = [];
+        raw.split("\n").forEach((line) => {
+            const trimmed = line.trim();
+            if (!trimmed) return;
+            const m = trimmed.match(tagRe);
+            if (m) {
+                if (activity_name && m[1].trim() === String(activity_name).trim()) {
+                    mine.push(trimmed.replace(tagRe, ""));
+                }
+                // else: tagged for a different activity, not relevant here.
+            } else {
+                general.push(trimmed);
+            }
+        });
+        return general.concat(mine).join("\n");
+    },
+
     // ---- OpenAI ----
     async fetch_models(key) {
         const res = await fetch("https://api.openai.com/v1/models", {
@@ -260,7 +290,7 @@ const QMR = {
         return [
             "You draft KPI Target Description (only if it is blank), Evaluation Text and Improvement Action for a Quality Monitoring Record activity at United Ceres College (UCC), a Singapore private education institution preparing for an EduTrust audit.",
             "",
-            "You are given, in priority order: the PROCEDURE (how UCC does it, authoritative for steps and evidence), the activity details, the KPI target and actual, and an OVERALL NOTE describing what happened this period.",
+            "You are given, in priority order: the PROCEDURE (how UCC does it, authoritative for steps and evidence), the activity details, the KPI target and actual, and an OVERALL NOTE, which is whatever explanation exists specifically for THIS activity plus any general remarks not tied to one activity (never another activity's explanation).",
             "",
             "GROUNDING RULES (critical):",
             "- Your draft must be consistent with the PROCEDURE: reference its actual steps, evidence types and responsibilities. Do not describe generic controls the procedure does not mention.",
@@ -337,7 +367,7 @@ const QMR = {
             kpi_actual_value: row.kpi_actual_value,
             uom: row.uom,
             ownership: row.ownership,
-            overall_note: frm.doc.overall_note || "(none provided)"
+            overall_note: this.activity_note_for(frm, row.activity_name) || "(none provided)"
         };
 
         let out;
@@ -684,8 +714,11 @@ const QMR = {
       Procedure</b> record for this criterion. Click <b>Grounding &amp; model</b> to check it is loaded, or to
       open/create that record if it is missing. There is nothing to paste here any more.</li>
   <li><b>Say what happened.</b> If a result was below target, or nothing happened this period, type a short line
-      in the record's <b>Overall Note</b> (near the top of the form) explaining why. The AI needs this so it can
-      be honest rather than guess.</li>
+      in the record's <b>Overall Note</b> (near the top of the form) explaining why. Start the line with the
+      activity's name in square brackets, for example "[Conduct surveys] No responses were received this term
+      due to...", so it is used only for that activity and not confused with another one's explanation. A line
+      with no bracket is treated as a general remark seen by every activity. The AI needs this so it can be
+      honest rather than guess.</li>
   <li><b>Write the text.</b> Click <b>Draft</b> on any activity card to fill just that one, or <b>Draft all empty</b>
       to do every activity that is still blank. The first time, it asks for your OpenAI key (kept only for this
       browser session).</li>
@@ -727,7 +760,8 @@ const QMR = {
   </div>
   <ol style="margin:0;padding-left:18px;line-height:1.6;">
     <li><b>Grounding &amp; model</b> (top): confirm the Quality Procedure record for this criterion is loaded.</li>
-    <li>Type a short line in <b>Overall Note</b> if a target was missed or nothing happened.</li>
+    <li>Type a short line in <b>Overall Note</b> if a target was missed or nothing happened; start it with
+        "[Activity Name]" so it is used for that activity only.</li>
     <li>Click <b>Draft</b> on a card (or <b>Draft all empty</b>), then review and <b>Save</b>.</li>
   </ol>
   <div style="margin-top:5px;"><a href="#" data-howto style="font-size:12px;">See the full step by step</a></div>
