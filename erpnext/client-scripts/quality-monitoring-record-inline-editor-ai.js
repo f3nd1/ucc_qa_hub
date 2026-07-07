@@ -110,19 +110,36 @@ const QMR = {
         if (!opts.refresh && this._procCache[criterion]) return this._procCache[criterion];
         let result = { text: "", name: null };
         try {
+            // Only fetch the docname from the list query. Asking a list query for a
+            // second field can come back blank if that field has any field-level
+            // permission restriction, even when the record itself matched, so the
+            // procedure text is read from a full document fetch instead, below.
             const list = await frappe.db.get_list(this.PROC_DOCTYPE, {
                 filters: { [this.PROC_MATCH_FIELD]: criterion },
-                fields: ["name", this.PROC_TEXT_FIELD],
+                fields: ["name"],
                 limit: 1
             });
             if (list && list.length) {
-                result = { text: this.strip(list[0][this.PROC_TEXT_FIELD] || ""), name: list[0].name };
+                const name = list[0].name;
+                // frappe.client.get (whitelisted on every Frappe version) fetches the
+                // whole document, which is not subject to the same field selection
+                // restrictions a list query can silently apply.
+                const r = await frappe.call({ method: "frappe.client.get", args: { doctype: this.PROC_DOCTYPE, name } });
+                const doc = r && r.message;
+                result = { text: this.strip((doc && doc[this.PROC_TEXT_FIELD]) || ""), name };
             }
         } catch (e) {
             console.warn("Could not load Quality Procedure:", e.message);
         }
         this._procCache[criterion] = result;
         return result;
+    },
+    no_procedure_message(criterion, proc) {
+        return proc.name
+            ? "The Quality Procedure record " + proc.name + " was found for criterion '" + criterion +
+              "', but its procedure text field (" + this.PROC_TEXT_FIELD + ") is empty. Fill it in on that record."
+            : "No Quality Procedure record found for criterion '" + criterion +
+              "'. Click 'Grounding & model' to check or create one.";
     },
 
     // ---- OpenAI ----
@@ -234,10 +251,7 @@ const QMR = {
         const proc = await this.get_procedure(criterion);
         if (!proc.text) {
             if (!opts.silent) {
-                frappe.msgprint(
-                    "No Quality Procedure record found for criterion '" + criterion +
-                    "'. Click 'Grounding & model' to check or create one."
-                );
+                frappe.msgprint(this.no_procedure_message(criterion, proc));
                 this.open_grounding(frm);
             }
             return "no-proc";
@@ -335,10 +349,7 @@ const QMR = {
         if (!criterion) { frappe.msgprint("This record has no Criterion set."); return; }
         const proc = await this.get_procedure(criterion);
         if (!proc.text) {
-            frappe.msgprint(
-                "No Quality Procedure record found for criterion '" + criterion +
-                "'. Click 'Grounding & model' to check or create one."
-            );
+            frappe.msgprint(this.no_procedure_message(criterion, proc));
             this.open_grounding(frm);
             return;
         }
@@ -633,8 +644,14 @@ const QMR = {
   <button class="qmr-btn primary" data-draftall title="Fill Evaluation Text and Improvement Action for every activity that is still blank in this record.">Draft all empty</button>
   <button class="qmr-btn" data-grounding title="Check the procedure loaded from the Quality Procedure record for this criterion, and pick the AI model. The AI writes only from that procedure, so it stays honest.">Grounding &amp; model</button>
   <button class="qmr-btn" data-howto title="A short step by step, in plain language.">How to use</button>
-  <span class="qmr-ground ${has_proc ? "qmr-ground-ok" : "qmr-ground-no"}" title="${has_proc ? "A matching Quality Procedure record was found for this criterion, so drafting is allowed." : "No Quality Procedure record found for this criterion. Click Grounding and model to check or create one before drafting."}">
-    ${criterion ? (has_proc ? "Procedure loaded for " + this.esc(criterion) : "No Quality Procedure for " + this.esc(criterion) + " (drafting is blocked)") : "No Criterion on this record"}
+  <span class="qmr-ground ${has_proc ? "qmr-ground-ok" : "qmr-ground-no"}" title="${criterion ? (has_proc ? "Loaded from Quality Procedure " + this.esc(proc.name) + "." : this.esc(this.no_procedure_message(criterion, proc))) : ""}">
+    ${criterion
+        ? (has_proc
+            ? "Procedure loaded for " + this.esc(criterion)
+            : (proc.name
+                ? "Quality Procedure " + this.esc(proc.name) + " has no procedure text (drafting is blocked)"
+                : "No Quality Procedure for " + this.esc(criterion) + " (drafting is blocked)"))
+        : "No Criterion on this record"}
   </span>
   <span class="qmr-muted">Model: ${this.esc(this.get_model())}</span>
 </div>`;
