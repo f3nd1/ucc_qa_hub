@@ -224,18 +224,17 @@ const QMR = {
         return general.concat(mine).join("\n");
     },
 
-    // ---- deterministic variance gate ----
-    // The whole point: whenever the KPI actual differs from the target at all
-    // (in either direction), ask the user WHY before drafting, every time,
-    // rather than leaving that judgement to the model. Only skip the ask when
-    // there is no variance to explain, or the reason is already recorded in
-    // this activity's note.
+    // ---- deterministic context gate ----
+    // The whole point: before drafting ANY activity that has KPI numbers, ask
+    // the reviewer for the reason or remark first, every time, rather than
+    // leaving that judgement to the model. This fires whether the actual is
+    // below, above OR equal to the target. It only skips the ask when there is
+    // no number to talk about, or a reason is already recorded for this activity.
     has_number(v) {
         return v !== null && v !== undefined && v !== "" && !Number.isNaN(Number(v));
     },
-    variance_unexplained(frm, row) {
+    needs_context(frm, row) {
         if (!this.has_number(row.kpi_target_value) || !this.has_number(row.kpi_actual_value)) return false;
-        if (Number(row.kpi_actual_value) === Number(row.kpi_target_value)) return false; // met exactly
         return !String(this.activity_note_for(frm, row.activity_name) || "").trim();
     },
     fmt_val(v, uom) {
@@ -243,13 +242,18 @@ const QMR = {
         const u = uom ? (String(uom).trim() === "%" ? "%" : " " + String(uom).trim()) : "";
         return String(v) + u;
     },
-    variance_question(row) {
-        const delta = Number(row.kpi_actual_value) - Number(row.kpi_target_value);
-        const dir = delta < 0 ? "below" : "above";
-        const gap = this.fmt_val(Math.abs(delta), row.uom);
-        return "For \"" + (row.activity_name || "this activity") + "\", the actual (" +
-            this.fmt_val(row.kpi_actual_value, row.uom) + ") is " + gap + " " + dir + " the target (" +
-            this.fmt_val(row.kpi_target_value, row.uom) + "). What caused this difference?";
+    context_question(row) {
+        const t = Number(row.kpi_target_value), a = Number(row.kpi_actual_value);
+        const name = row.activity_name || "this activity";
+        const av = this.fmt_val(row.kpi_actual_value, row.uom), tv = this.fmt_val(row.kpi_target_value, row.uom);
+        if (a === t) {
+            return "For \"" + name + "\", the actual (" + av + ") met the target (" + tv +
+                "). Add any remark you want reflected, or leave blank to draft a standard confirmation.";
+        }
+        const dir = a - t < 0 ? "below" : "above";
+        const gap = this.fmt_val(Math.abs(a - t), row.uom);
+        return "For \"" + name + "\", the actual (" + av + ") is " + gap + " " + dir + " the target (" + tv +
+            "). What caused this difference?";
     },
 
     // ---- OpenAI ----
@@ -377,11 +381,11 @@ const QMR = {
         const row = (frm.doc.items || []).find((r) => String(r.idx) === String(idx));
         if (!row) return "error";
 
-        // Deterministic gate: any KPI variance that has not been explained yet
-        // stops here and asks the user why, before spending an API call. Bypassed
-        // only when the caller explicitly chose the generic path (opts.generic).
-        if (!opts.generic && this.variance_unexplained(frm, row)) {
-            return { status: "need_input", question: this.variance_question(row), variance: true };
+        // Deterministic gate: before drafting any activity with KPI numbers and
+        // no recorded reason yet, stop here and ask the reviewer, before spending
+        // an API call. Bypassed only when the caller chose the generic path.
+        if (!opts.generic && this.needs_context(frm, row)) {
+            return { status: "need_input", question: this.context_question(row) };
         }
 
         const key = await this.get_key();
@@ -484,16 +488,16 @@ const QMR = {
         return new Promise((resolve) => {
             let settled = false;
             const d = new frappe.ui.Dialog({
-                title: "Why the difference? " + (activity_name || "activity #" + idx),
+                title: "Before drafting: " + (activity_name || "activity #" + idx),
                 fields: [
                     {
                         fieldtype: "HTML", fieldname: "q_html",
-                        options: `<div style="margin-bottom:10px;color:#1a3b6e;">${self.esc(question || "What caused this difference?")}</div>`
+                        options: `<div style="margin-bottom:10px;color:#1a3b6e;">${self.esc(question || "Add any reason or remark for this activity.")}</div>`
                     },
                     {
-                        label: "Reason for the difference", fieldname: "answer", fieldtype: "Small Text",
-                        description: "A short cause, for example \"intake was deferred to next term\". Leave blank and click " +
-                            "\"Draft generic\" if there is no specific cause to record."
+                        label: "Reason or remark", fieldname: "answer", fieldtype: "Small Text",
+                        description: "A short cause or note, for example \"intake was deferred to next term\". Leave blank and click " +
+                            "\"Draft generic\" if there is nothing specific to record."
                     }
                 ],
                 primary_action_label: "Add reason and draft",
@@ -766,15 +770,16 @@ const QMR = {
   <li><b>Write the text.</b> Click <b>Draft</b> on any activity card to fill just that one, or <b>Draft all empty</b>
       to do every activity that is still blank. The first time, it asks for your OpenAI key (kept only for this
       browser session).</li>
-  <li><b>Whenever the KPI actual differs from the target, it asks you why first.</b> A box shows the gap (for
-      example "the actual 0% is 100% below the target 100%") and asks what caused it. Type a short reason and it
-      drafts a concise note grounded in that reason. If there is no specific cause to record, click <b>Draft
-      generic (no specific reason)</b> and it writes a brief neutral note without inventing a cause. It never
-      restates the raw numbers (those are already in the fields) and never makes up a reason.</li>
+  <li><b>Before it drafts, it always asks you first.</b> A box shows the KPI result (for example "the actual 0%
+      is 100% below the target 100%", or "the actual 100% met the target 100%") and asks for the reason or
+      remark. This happens for every activity, whether the target was missed, exceeded or met exactly. Type a
+      short reason and it drafts a concise note grounded in that reason. If there is nothing specific to record,
+      click <b>Draft generic (no specific reason)</b> and it writes a brief neutral note without inventing
+      anything. It never restates the raw numbers (those are already in the fields) and never makes up a reason.</li>
   <li><b>Check, then save.</b> Read what it wrote in the Evaluation Text and Improvement Action boxes, edit anything
       you want, then click <b>Save</b>. Nothing is saved until you do.</li>
-  <li><b>With Draft all empty</b>, the "why the difference?" box appears one activity at a time, so it pauses and
-      asks for each activity whose actual differs from target. Closing the box without choosing skips that one.</li>
+  <li><b>With Draft all empty</b>, this box appears one activity at a time, pausing for each activity. Closing the
+      box without choosing skips that one.</li>
 </ol>`;
     },
     how_to(frm) {
@@ -806,8 +811,8 @@ const QMR = {
   </div>
   <ol style="margin:0;padding-left:18px;line-height:1.6;">
     <li><b>Grounding &amp; model</b> (top): confirm the Quality Procedure record for this criterion is loaded.</li>
-    <li>Click <b>Draft</b> on a card (or <b>Draft all empty</b>). If the KPI actual differs from target, it asks
-        you why first; type a short reason, or choose <b>Draft generic</b>.</li>
+    <li>Click <b>Draft</b> on a card (or <b>Draft all empty</b>). Before drafting it asks you for the reason or
+        remark (every activity, even when the target was met); type a short reason, or choose <b>Draft generic</b>.</li>
     <li>Review the drafted text and <b>Save</b>. Nothing is saved until you do.</li>
   </ol>
   <div style="margin-top:5px;"><a href="#" data-howto style="font-size:12px;">See the full step by step</a></div>

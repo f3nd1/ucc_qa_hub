@@ -60,7 +60,7 @@ activity can need its own separate explanation. To keep one activity's answer
 from being read as grounding for a different activity:
 
 - A line starting with `[Activity Name]` is used only when drafting that
-  activity. The **Needs your input** answer dialog tags your answer this way
+  activity. The **Before drafting** dialog tags your reason this way
   automatically.
 - A line with no `[...]` tag is treated as a general remark and is visible to
   every activity.
@@ -68,14 +68,28 @@ from being read as grounding for a different activity:
   entirely, so A's draft is never grounded in an explanation that was actually
   about B.
 
+## Always asks before drafting
+
+Before drafting any activity that has KPI target and actual values, the script
+deterministically asks the reviewer for the reason or remark first, every time,
+whether the actual is below, above or equal to the target. This is a hard rule
+in the script, not left to the model's judgement.
+
+- Typing a reason tags and appends it to the Overall Note, and the activity is
+  drafted grounded in that reason.
+- **Draft generic (no specific reason)** drafts a brief, neutral statement of
+  the result with no invented cause.
+- The ask is skipped only when a reason is already recorded for that activity,
+  or the activity has no KPI numbers to talk about.
+
 ## Rules kept (do not weaken)
 
 - No matching Quality Procedure record for the criterion means it will not draft.
-- If an activity has no concrete basis (for example a shortfall, or an actual
-  value of 0, with no note explaining the cause), that activity refuses and
-  asks a specific question instead of inventing text. An actual of 0 against a
-  positive target is never assumed to be benign; it needs the same note-backed
-  explanation as any other shortfall.
+- Evaluation Text never invents a cause. When no reason is recorded and the
+  reviewer chooses the generic path, it states the result neutrally without
+  inventing why. It never restates the raw target and actual numbers (those are
+  already in their own fields); it summarises the gap and, where given, the
+  cause.
 
 ## Other scripts on this DocType
 
