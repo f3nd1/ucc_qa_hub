@@ -88,9 +88,19 @@ const QMR = {
     // contain whitespace, and a stray newline (easy to embed by accident in a
     // multi-line Text field, e.g. an extra Enter or a paste with a line break)
     // makes fetch() throw "Invalid value" when it is used in an Authorization
-    // header, since header values cannot contain control characters.
+    // header, since header values cannot contain control characters. Also strips
+    // zero-width and other invisible Unicode characters that \s does not match
+    // (common when a key is copied out of Notion/Slack/Google Docs) and that
+    // OpenAI would otherwise silently reject as part of the key, showing up as
+    // a plain 401 with no obvious cause.
     clean_key(v) {
-        return String(v || "").replace(/\s+/g, "");
+        // 0x200B-0x200F: zero-width space/joiners, LTR/RTL marks
+        // 0x2060: word joiner, 0xFEFF: byte order mark, 0x00AD: soft hyphen
+        const invisible = [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0xfeff, 0x00ad]
+            .map((code) => String.fromCharCode(code))
+            .join("");
+        const pattern = new RegExp("[\\s" + invisible + "]+", "g");
+        return String(v || "").replace(pattern, "");
     },
     get_key() {
         if (!window._qmrKey) window._qmrKey = this.clean_key(sessionStorage.getItem(this.KEY_SS));
@@ -157,7 +167,12 @@ const QMR = {
         });
         if (!res.ok) {
             if (res.status === 401) this.clear_key();
-            throw new Error(`OpenAI ${res.status}`);
+            let detail = "";
+            try {
+                const err = await res.json();
+                detail = err.error && err.error.message ? err.error.message : "";
+            } catch (e) {}
+            throw new Error(`OpenAI ${res.status}${detail ? ": " + detail : ""}`);
         }
         const data = await res.json();
         return (data.data || [])
@@ -299,7 +314,11 @@ const QMR = {
             ]);
         } catch (e) {
             if (e.status === 401) {
-                frappe.msgprint("OpenAI rejected the key (401). It has been cleared. Try again to re-enter it.");
+                if (!opts.silent)
+                    frappe.msgprint(
+                        "OpenAI rejected the key (401" + (e.message ? ": " + e.message.replace(/^OpenAI 401:\s*/, "") : "") +
+                        "). It has been cleared. Click Draft again to re-enter it."
+                    );
                 return "401";
             }
             if (/Invalid value/.test(e.message || "")) {
