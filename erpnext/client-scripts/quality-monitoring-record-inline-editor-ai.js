@@ -224,6 +224,34 @@ const QMR = {
         return general.concat(mine).join("\n");
     },
 
+    // ---- deterministic variance gate ----
+    // The whole point: whenever the KPI actual differs from the target at all
+    // (in either direction), ask the user WHY before drafting, every time,
+    // rather than leaving that judgement to the model. Only skip the ask when
+    // there is no variance to explain, or the reason is already recorded in
+    // this activity's note.
+    has_number(v) {
+        return v !== null && v !== undefined && v !== "" && !Number.isNaN(Number(v));
+    },
+    variance_unexplained(frm, row) {
+        if (!this.has_number(row.kpi_target_value) || !this.has_number(row.kpi_actual_value)) return false;
+        if (Number(row.kpi_actual_value) === Number(row.kpi_target_value)) return false; // met exactly
+        return !String(this.activity_note_for(frm, row.activity_name) || "").trim();
+    },
+    fmt_val(v, uom) {
+        if (!this.has_number(v)) return String(v == null ? "" : v);
+        const u = uom ? (String(uom).trim() === "%" ? "%" : " " + String(uom).trim()) : "";
+        return String(v) + u;
+    },
+    variance_question(row) {
+        const delta = Number(row.kpi_actual_value) - Number(row.kpi_target_value);
+        const dir = delta < 0 ? "below" : "above";
+        const gap = this.fmt_val(Math.abs(delta), row.uom);
+        return "For \"" + (row.activity_name || "this activity") + "\", the actual (" +
+            this.fmt_val(row.kpi_actual_value, row.uom) + ") is " + gap + " " + dir + " the target (" +
+            this.fmt_val(row.kpi_target_value, row.uom) + "). What caused this difference?";
+    },
+
     // ---- OpenAI ----
     async fetch_models(key) {
         const res = await fetch("https://api.openai.com/v1/models", {
@@ -294,20 +322,22 @@ const QMR = {
             "",
             "GROUNDING RULES (critical):",
             "- Your draft must be consistent with the PROCEDURE: reference its actual steps, evidence types and responsibilities. Do not describe generic controls the procedure does not mention.",
-            "- Every specific claim must be supported by the KPI actual or the OVERALL NOTE. Do not invent events, numbers, dates, names or evidence, and never attribute a claim to \"the note\" or \"the overall note\" unless its actual text supports that claim.",
-            "- An actual value below target is a shortfall needing an explanation. An actual value of 0 against a positive target is ALSO a shortfall needing an explanation, never automatically good news: only describe it as benign (for example \"no incidents occurred, controls remain in place\") if the OVERALL NOTE itself says so in substance.",
-            "- If the inputs do not give a concrete basis for the pattern in front of you (a shortfall, or an actual of 0, with no note explaining why), do not guess and do not invent a plausible-sounding reason. Refuse instead.",
+            "- Every specific claim must be supported by the KPI actual or the OVERALL NOTE. Do not invent events, numbers, dates, names or evidence, and never attribute a claim to \"the note\" unless its actual text supports it.",
+            "- When GENERIC_MODE is false and the OVERALL NOTE does not explain the variance, do not invent a cause. Refuse instead.",
             "",
             'REFUSAL FORMAT: return {"status":"need_input","missing":["..."],"question":"one plain question asking for the specific fact needed"}.',
             "",
             'WHEN YOU CAN DRAFT, return {"status":"ok","evaluation_text":"...","improvement_action":"...","kpi_target_desc":"include only if NEEDS_TARGET_DESC is true, otherwise omit"}.',
             "",
+            "BE CONCISE. The KPI target and actual values already appear in their own fields on the form. Do NOT restate both raw numbers in Evaluation Text. Do not write \"the target of 100% was not met, with an actual of 0%\". Instead summarise the direction and size of the gap and its cause, for example \"Fell short by 100, as no surveys were distributed this period\" or \"Exceeded by 15 following the additional intake\".",
+            "",
             "STYLE:",
             "- UK British spelling. Never use em dashes.",
-            "- Evaluation Text: 1 to 3 sentences, factual, consistent with actual vs target, grounded in the procedure.",
-            "- Met or exceeded target: confirm completion, cite the procedure's evidence type.",
-            "- Below target, including an actual of 0: acknowledge the shortfall plainly and state the cause from the note. Never write a fully positive or \"controls remain in place\" narrative over a shortfall unless the note itself explains why it is not a concern.",
-            "- Improvement Action: 1 to 2 sentences. Maintain the current controls only when the target was met, or when the note confirms the shortfall is expected and benign. Otherwise, a specific Quality Action with owner and deadline.",
+            "- Evaluation Text: 1 to 2 short sentences, factual, grounded in the procedure and the recorded reason.",
+            "- Target met exactly: one sentence confirming it was met, citing the procedure's evidence type.",
+            "- Below or above target: state the gap and the cause from the note concisely. Never write a fully positive or \"controls remain in place\" narrative over a shortfall unless the note explains why it is not a concern.",
+            "- Improvement Action: 1 sentence. Maintain the current controls when the target was met or the note confirms the variance is benign; otherwise a specific Quality Action with owner and deadline.",
+            "- GENERIC_MODE true: the reviewer has confirmed there is no specific recorded cause. Write a brief, neutral statement of the result against target with NO invented cause, event, reason or evidence, and do NOT claim controls remain in place unless the procedure or note says so. Still summarise the gap concisely rather than restating both numbers. For Improvement Action, state a general next step consistent with the procedure without inventing specifics. Never refuse in GENERIC_MODE.",
             "- Terminology: teacher not instructor, Quality Action not corrective action plan, SQ for Strategic and Quality Management, Providers capitalised for third party service providers.",
             "Return JSON only."
         ].join("\n");
@@ -317,11 +347,12 @@ const QMR = {
             "You are a strict reviewer of a Quality Monitoring evaluation for UCC.",
             "Check the DRAFT against these rules and the inputs:",
             "1. UK British spelling, no em dashes.",
-            "2. Every factual claim is supported by the KPI actual or the note. No invented events, numbers, names or dates, and no claim attributed to \"the note\" that the note's actual text does not say.",
-            "3. If actual is below target, OR actual is 0 against a positive target with no note explaining it, the shortfall is acknowledged plainly, not glossed over as benign.",
-            "4. The evaluation reflects this activity and its procedure.",
-            "5. Improvement Action uses Maintain only when the target was met or the note confirms the shortfall is expected and benign; otherwise a specific Quality Action with owner and deadline.",
-            "6. No placeholder [...] text.",
+            "2. Every factual claim is supported by the KPI actual or the note. No invented events, numbers, names or dates, and no claim attributed to \"the note\" that the note's actual text does not say. In GENERIC_MODE there must be NO invented cause at all.",
+            "3. Concise: the raw target and actual numbers are not restated verbatim; the text summarises the gap and cause instead.",
+            "4. A shortfall is acknowledged plainly, not glossed over as benign, unless the note explains why it is not a concern.",
+            "5. The evaluation reflects this activity and its procedure.",
+            "6. Improvement Action uses Maintain only when the target was met or the note confirms the variance is benign; otherwise a specific Quality Action with owner and deadline.",
+            "7. No placeholder [...] text.",
             'If all pass return {"ok":true}. If any fail return {"ok":false,"evaluation_text":"corrected","improvement_action":"corrected"}.',
             "Return JSON only."
         ].join("\n");
@@ -346,6 +377,13 @@ const QMR = {
         const row = (frm.doc.items || []).find((r) => String(r.idx) === String(idx));
         if (!row) return "error";
 
+        // Deterministic gate: any KPI variance that has not been explained yet
+        // stops here and asks the user why, before spending an API call. Bypassed
+        // only when the caller explicitly chose the generic path (opts.generic).
+        if (!opts.generic && this.variance_unexplained(frm, row)) {
+            return { status: "need_input", question: this.variance_question(row), variance: true };
+        }
+
         const key = await this.get_key();
         if (!key) return "error";
         const model = this.get_model();
@@ -355,6 +393,7 @@ const QMR = {
         const payload = {
             procedure: proc.text,
             pattern: this.detect_pattern(row),
+            generic_mode: !!opts.generic,
             criterion,
             department: frm.doc.department,
             period: (frm.doc.period_from || "") + " to " + (frm.doc.period_to || ""),
@@ -430,43 +469,55 @@ const QMR = {
         return "ok";
     },
 
-    // ---- answer box for a "need_input" refusal, then redraft that activity ----
-    // Returns a Promise that resolves once this activity is settled: "ok",
-    // "error", "401", or "skipped" (user chose not to answer). Used by both the
-    // per-card Draft button and, one at a time, by draft_all_empty, so a bulk
-    // run pauses on each question instead of only surfacing it once at the end.
+    // ---- ask why the KPI differs, then redraft that activity ----
+    // Returns a Promise resolving once this activity is settled: "ok", "error",
+    // "401", or "skipped". Used by both the per-card Draft button and, one at a
+    // time, by draft_all_empty. Two ways forward:
+    //   - Type a reason: it is tagged and appended to the Overall Note, then the
+    //     activity is redrafted grounded in that reason.
+    //   - Draft generic: no specific cause is recorded; the activity is drafted
+    //     as a brief, neutral statement of the variance with no invented cause.
+    // Closing the dialog without choosing either is treated as skip.
     ask_and_redraft(frm, idx, activity_name, question, opts) {
         opts = opts || {};
         const self = this;
         return new Promise((resolve) => {
-            let programmatic = false;
+            let settled = false;
             const d = new frappe.ui.Dialog({
-                title: "Needs your input: " + (activity_name || "activity #" + idx),
+                title: "Why the difference? " + (activity_name || "activity #" + idx),
                 fields: [
                     {
                         fieldtype: "HTML", fieldname: "q_html",
-                        options: `<div style="margin-bottom:10px;color:#1a3b6e;">${self.esc(question || "Needs more information.")}</div>`
+                        options: `<div style="margin-bottom:10px;color:#1a3b6e;">${self.esc(question || "What caused this difference?")}</div>`
                     },
-                    { label: "Your answer", fieldname: "answer", fieldtype: "Small Text", reqd: 1 }
+                    {
+                        label: "Reason for the difference", fieldname: "answer", fieldtype: "Small Text",
+                        description: "A short cause, for example \"intake was deferred to next term\". Leave blank and click " +
+                            "\"Draft generic\" if there is no specific cause to record."
+                    }
                 ],
-                primary_action_label: "Add to Overall Note and redraft",
-                secondary_action_label: "Skip this activity",
-                secondary_action() {
-                    programmatic = true;
+                primary_action_label: "Add reason and draft",
+                secondary_action_label: "Draft generic (no specific reason)",
+                async secondary_action() {
+                    if (settled) return;
+                    settled = true;
                     d.hide();
-                    resolve("skipped");
+                    resolve(await self.draft_row(frm, idx, { silent: opts.silent, generic: true }));
                 },
                 async primary_action(values) {
                     const answer = String(values.answer || "").trim();
-                    if (!answer) return;
-                    d.get_primary_btn().prop("disabled", true).text("Redrafting...");
+                    if (!answer) {
+                        frappe.msgprint("Type a short reason, or click \"Draft generic (no specific reason)\" below.");
+                        return;
+                    }
+                    settled = true;
+                    d.get_primary_btn().prop("disabled", true).text("Drafting...");
                     const prefix = activity_name ? "[" + activity_name + "] " : "";
                     const existing = String(frm.doc.overall_note || "").trim();
                     const updated = existing ? existing + "\n" + prefix + answer : prefix + answer;
                     await frm.set_value("overall_note", updated);
-                    programmatic = true;
                     d.hide();
-                    const r = await self.draft_row(frm, idx, opts);
+                    const r = await self.draft_row(frm, idx, { silent: opts.silent });
                     if (r && r.status === "need_input") {
                         resolve(await self.ask_and_redraft(frm, idx, activity_name, r.question, opts));
                     } else {
@@ -474,10 +525,9 @@ const QMR = {
                     }
                 }
             });
-            // If the user closes the dialog without answering or skipping
-            // (X button, backdrop click), treat it the same as Skip so a bulk
-            // run does not hang forever waiting for a decision.
-            d.$wrapper.on("hidden.bs.modal", () => { if (!programmatic) resolve("skipped"); });
+            // Closing the dialog without choosing (X button, backdrop click) is a
+            // skip, so a bulk run does not hang waiting for a decision.
+            d.$wrapper.on("hidden.bs.modal", () => { if (!settled) { settled = true; resolve("skipped"); } });
             d.show();
         });
     },
@@ -713,22 +763,18 @@ const QMR = {
   <li><b>Make sure the procedure exists.</b> The procedure text comes automatically from the <b>Quality
       Procedure</b> record for this criterion. Click <b>Grounding &amp; model</b> to check it is loaded, or to
       open/create that record if it is missing. There is nothing to paste here any more.</li>
-  <li><b>Say what happened.</b> If a result was below target, or nothing happened this period, type a short line
-      in the record's <b>Overall Note</b> (near the top of the form) explaining why. Start the line with the
-      activity's name in square brackets, for example "[Conduct surveys] No responses were received this term
-      due to...", so it is used only for that activity and not confused with another one's explanation. A line
-      with no bracket is treated as a general remark seen by every activity. The AI needs this so it can be
-      honest rather than guess.</li>
   <li><b>Write the text.</b> Click <b>Draft</b> on any activity card to fill just that one, or <b>Draft all empty</b>
       to do every activity that is still blank. The first time, it asks for your OpenAI key (kept only for this
       browser session).</li>
+  <li><b>Whenever the KPI actual differs from the target, it asks you why first.</b> A box shows the gap (for
+      example "the actual 0% is 100% below the target 100%") and asks what caused it. Type a short reason and it
+      drafts a concise note grounded in that reason. If there is no specific cause to record, click <b>Draft
+      generic (no specific reason)</b> and it writes a brief neutral note without inventing a cause. It never
+      restates the raw numbers (those are already in the fields) and never makes up a reason.</li>
   <li><b>Check, then save.</b> Read what it wrote in the Evaluation Text and Improvement Action boxes, edit anything
       you want, then click <b>Save</b>. Nothing is saved until you do.</li>
-  <li><b>If it asks a question instead of writing:</b> that means it did not have enough to go on. A box appears
-      with the question and a place to type your answer; submitting it adds your answer to the record's Overall
-      Note and drafts that activity again automatically. With <b>Draft all empty</b>, this happens one activity at
-      a time, so it will pause and ask for each one that needs it (you can also click <b>Skip this activity</b>
-      to move on without answering). It will never make up facts, dates, or numbers.</li>
+  <li><b>With Draft all empty</b>, the "why the difference?" box appears one activity at a time, so it pauses and
+      asks for each activity whose actual differs from target. Closing the box without choosing skips that one.</li>
 </ol>`;
     },
     how_to(frm) {
@@ -760,9 +806,9 @@ const QMR = {
   </div>
   <ol style="margin:0;padding-left:18px;line-height:1.6;">
     <li><b>Grounding &amp; model</b> (top): confirm the Quality Procedure record for this criterion is loaded.</li>
-    <li>Type a short line in <b>Overall Note</b> if a target was missed or nothing happened; start it with
-        "[Activity Name]" so it is used for that activity only.</li>
-    <li>Click <b>Draft</b> on a card (or <b>Draft all empty</b>), then review and <b>Save</b>.</li>
+    <li>Click <b>Draft</b> on a card (or <b>Draft all empty</b>). If the KPI actual differs from target, it asks
+        you why first; type a short reason, or choose <b>Draft generic</b>.</li>
+    <li>Review the drafted text and <b>Save</b>. Nothing is saved until you do.</li>
   </ol>
   <div style="margin-top:5px;"><a href="#" data-howto style="font-size:12px;">See the full step by step</a></div>
 </div>`;
