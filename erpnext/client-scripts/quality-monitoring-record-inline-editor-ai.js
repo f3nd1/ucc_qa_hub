@@ -102,19 +102,53 @@ const QMR = {
         const pattern = new RegExp("[\\s" + invisible + "]+", "g");
         return String(v || "").replace(pattern, "");
     },
+    // OpenAI secret keys always start with "sk-". Gate on that before ever
+    // sending it anywhere, so a key pasted from a different service (Google,
+    // Anthropic, etc.) is caught immediately with a clear message instead of
+    // producing a confusing 401 from OpenAI.
+    looks_like_openai_key(k) {
+        return /^sk-/.test(k || "");
+    },
     get_key() {
-        if (!window._qmrKey) window._qmrKey = this.clean_key(sessionStorage.getItem(this.KEY_SS));
-        if (window._qmrKey) return Promise.resolve(window._qmrKey);
+        const cached = this.clean_key(sessionStorage.getItem(this.KEY_SS));
+        if (cached && this.looks_like_openai_key(cached)) {
+            window._qmrKey = cached;
+            return Promise.resolve(window._qmrKey);
+        }
+        if (window._qmrKey && this.looks_like_openai_key(window._qmrKey)) return Promise.resolve(window._qmrKey);
+
+        const self = this;
         return new Promise((resolve) => {
-            frappe.prompt(
-                { label: "OpenAI API Key", fieldname: "key", fieldtype: "Text", reqd: 1 },
-                (v) => {
-                    window._qmrKey = this.clean_key(v.key);
-                    sessionStorage.setItem(this.KEY_SS, window._qmrKey);
-                    resolve(window._qmrKey);
-                },
-                "Enter API Key"
-            );
+            const ask = () => {
+                frappe.prompt(
+                    {
+                        label: "OpenAI API Key", fieldname: "key", fieldtype: "Text", reqd: 1,
+                        description: "From platform.openai.com/account/api-keys. Starts with sk-. Not a Google, " +
+                            "Anthropic or other service's key."
+                    },
+                    (v) => {
+                        const cleaned = self.clean_key(v.key);
+                        if (!self.looks_like_openai_key(cleaned)) {
+                            frappe.msgprint({
+                                title: "That does not look like an OpenAI key",
+                                message:
+                                    "OpenAI secret keys start with <b>sk-</b>. What you entered starts with \"" +
+                                    self.esc(cleaned.slice(0, 6)) +
+                                    "\", which looks like it may be from a different service. Get the right key from " +
+                                    '<a href="https://platform.openai.com/account/api-keys" target="_blank">platform.openai.com/account/api-keys</a>.',
+                                indicator: "red"
+                            });
+                            ask();
+                            return;
+                        }
+                        window._qmrKey = cleaned;
+                        sessionStorage.setItem(self.KEY_SS, cleaned);
+                        resolve(cleaned);
+                    },
+                    "Enter API Key"
+                );
+            };
+            ask();
         });
     },
 
