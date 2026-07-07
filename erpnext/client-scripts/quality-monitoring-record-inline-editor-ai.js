@@ -299,10 +299,9 @@ const QMR = {
         }
 
         if (out.status === "need_input") {
-            // No msgprint here: the caller decides how to present this. The
-            // per-card Draft button opens an answer dialog (see wire()); the bulk
-            // "Draft all empty" run just logs it and lets the user resolve it
-            // afterwards from the card.
+            // No msgprint here: the caller decides how to present this. Both the
+            // per-card Draft button and the "Draft all empty" loop open the same
+            // ask_and_redraft() dialog, one activity at a time.
             return { status: "need_input", question: out.question };
         }
 
@@ -332,39 +331,55 @@ const QMR = {
     },
 
     // ---- answer box for a "need_input" refusal, then redraft that activity ----
-    answer_need_input(frm, idx, activity_name, question) {
+    // Returns a Promise that resolves once this activity is settled: "ok",
+    // "error", "401", or "skipped" (user chose not to answer). Used by both the
+    // per-card Draft button and, one at a time, by draft_all_empty, so a bulk
+    // run pauses on each question instead of only surfacing it once at the end.
+    ask_and_redraft(frm, idx, activity_name, question, opts) {
+        opts = opts || {};
         const self = this;
-        const d = new frappe.ui.Dialog({
-            title: "Needs your input: " + (activity_name || "activity #" + idx),
-            fields: [
-                {
-                    fieldtype: "HTML", fieldname: "q_html",
-                    options: `<div style="margin-bottom:10px;color:#1a3b6e;">${this.esc(question || "Needs more information.")}</div>`
+        return new Promise((resolve) => {
+            let programmatic = false;
+            const d = new frappe.ui.Dialog({
+                title: "Needs your input: " + (activity_name || "activity #" + idx),
+                fields: [
+                    {
+                        fieldtype: "HTML", fieldname: "q_html",
+                        options: `<div style="margin-bottom:10px;color:#1a3b6e;">${self.esc(question || "Needs more information.")}</div>`
+                    },
+                    { label: "Your answer", fieldname: "answer", fieldtype: "Small Text", reqd: 1 }
+                ],
+                primary_action_label: "Add to Overall Note and redraft",
+                secondary_action_label: "Skip this activity",
+                secondary_action() {
+                    programmatic = true;
+                    d.hide();
+                    resolve("skipped");
                 },
-                { label: "Your answer", fieldname: "answer", fieldtype: "Small Text", reqd: 1 }
-            ],
-            primary_action_label: "Add to Overall Note and redraft",
-            async primary_action(values) {
-                const answer = String(values.answer || "").trim();
-                if (!answer) return;
-                d.get_primary_btn().prop("disabled", true).text("Redrafting...");
-                const prefix = activity_name ? "[" + activity_name + "] " : "";
-                const existing = String(frm.doc.overall_note || "").trim();
-                const updated = existing ? existing + "\n" + prefix + answer : prefix + answer;
-                await frm.set_value("overall_note", updated);
-                d.hide();
-                frappe.show_alert({ message: "Added to Overall Note. Redrafting...", indicator: "blue" });
-                const r = await self.draft_row(frm, idx);
-                self.render(frm);
-                if (r === "ok") {
-                    frappe.show_alert({ message: "Drafted " + (activity_name || "the activity") + ". Review, then Save.", indicator: "green" });
-                } else if (r && r.status === "need_input") {
-                    self.answer_need_input(frm, idx, activity_name, r.question);
+                async primary_action(values) {
+                    const answer = String(values.answer || "").trim();
+                    if (!answer) return;
+                    d.get_primary_btn().prop("disabled", true).text("Redrafting...");
+                    const prefix = activity_name ? "[" + activity_name + "] " : "";
+                    const existing = String(frm.doc.overall_note || "").trim();
+                    const updated = existing ? existing + "\n" + prefix + answer : prefix + answer;
+                    await frm.set_value("overall_note", updated);
+                    programmatic = true;
+                    d.hide();
+                    const r = await self.draft_row(frm, idx, opts);
+                    if (r && r.status === "need_input") {
+                        resolve(await self.ask_and_redraft(frm, idx, activity_name, r.question, opts));
+                    } else {
+                        resolve(r);
+                    }
                 }
-                // "error" and "401" cases already msgprint from inside draft_row.
-            }
+            });
+            // If the user closes the dialog without answering or skipping
+            // (X button, backdrop click), treat it the same as Skip so a bulk
+            // run does not hang forever waiting for a decision.
+            d.$wrapper.on("hidden.bs.modal", () => { if (!programmatic) resolve("skipped"); });
+            d.show();
         });
-        d.show();
     },
 
     async draft_all_empty(frm) {
@@ -402,11 +417,15 @@ const QMR = {
                 if (cancelled) break;
                 const row = targets[i];
                 prog.step(i, row.activity_name);
-                const r = await this.draft_row(frm, row.idx, { silent: true });
+                let r = await this.draft_row(frm, row.idx, { silent: true });
+                if (r && r.status === "need_input") {
+                    prog.waiting(row.activity_name, r.question);
+                    r = await this.ask_and_redraft(frm, row.idx, row.activity_name, r.question, { silent: true });
+                }
                 if (r === "ok") { drafted++; prog.result(row.activity_name, "ok"); }
                 else if (r === "401") { prog.result(row.activity_name, "401"); break; }
                 else if (r === "no-proc") { skipped.push({ a: row.activity_name, q: "No procedure set." }); prog.result(row.activity_name, "no-proc"); break; }
-                else if (r && r.status === "need_input") { skipped.push({ a: row.activity_name, q: r.question }); prog.result(row.activity_name, "need_input", r.question); }
+                else if (r === "skipped") { skipped.push({ a: row.activity_name, q: "Skipped." }); prog.result(row.activity_name, "skipped"); }
                 else { prog.result(row.activity_name, "error"); }
                 await new Promise((x) => setTimeout(x, 300));
             }
@@ -415,9 +434,9 @@ const QMR = {
             let summary = `Drafted ${drafted} of ${targets.length}${cancelled ? " (stopped early)" : ""}.`;
             if (skipped.length)
                 summary +=
-                    " <b>Needs your input:</b><ul style='margin:6px 0 0;padding-left:18px;'>" +
+                    " <b>Skipped:</b><ul style='margin:6px 0 0;padding-left:18px;'>" +
                     skipped.map((s) => `<li><b>${this.esc(s.a)}:</b> ${this.esc(s.q)}</li>`).join("") +
-                    "</ul><div style='margin-top:4px;'>Click <b>Draft</b> on each of those cards to answer and redraft it.</div>";
+                    "</ul><div style='margin-top:4px;'>Click <b>Draft</b> on each of those cards to try again.</div>";
             summary += "<div style='margin-top:6px;'>Nothing is saved yet. Review, then Save.</div>";
             prog.finish(summary, skipped.length ? "orange" : "green");
         }
@@ -454,6 +473,7 @@ const QMR = {
         const label = {
             ok: (n) => `<li style="color:#2e7d32;">&#10003; <b>${self.esc(n)}</b> drafted</li>`,
             need_input: (n, q) => `<li style="color:#e65100;">&#9873; <b>${self.esc(n)}</b> needs input: ${self.esc(q || "")}</li>`,
+            skipped: (n) => `<li style="color:#8a6d00;">&#8709; <b>${self.esc(n)}</b> skipped</li>`,
             error: (n) => `<li style="color:#c62828;">&#10007; <b>${self.esc(n)}</b> could not be drafted</li>`,
             "no-proc": (n) => `<li style="color:#c62828;">&#10007; <b>${self.esc(n)}</b> stopped: no procedure set</li>`,
             "401": (n) => `<li style="color:#c62828;">&#10007; <b>${self.esc(n)}</b> stopped: OpenAI rejected the key</li>`
@@ -464,6 +484,12 @@ const QMR = {
                 $count.text(`${i} of ${total}`);
                 $bar.css("width", Math.round((i / total) * 100) + "%");
                 $current.html(`Drafting ${i + 1} of ${total}: <span style="font-weight:400;">${self.esc(name || "activity")}</span> &nbsp;<span style="color:#999;font-weight:400;">(waiting for the AI...)</span>`);
+            },
+            waiting(name, question) {
+                $current.html(
+                    `<span style="color:#e65100;">&#9873; Needs your input for ${self.esc(name || "this activity")}:</span> ` +
+                    `<span style="font-weight:400;">${self.esc(question || "")}</span>`
+                );
             },
             result(name, status, q) {
                 const fn = label[status] || label.error;
@@ -597,7 +623,9 @@ const QMR = {
       you want, then click <b>Save</b>. Nothing is saved until you do.</li>
   <li><b>If it asks a question instead of writing:</b> that means it did not have enough to go on. A box appears
       with the question and a place to type your answer; submitting it adds your answer to the record's Overall
-      Note and drafts that activity again automatically. It will never make up facts, dates, or numbers.</li>
+      Note and drafts that activity again automatically. With <b>Draft all empty</b>, this happens one activity at
+      a time, so it will pause and ask for each one that needs it (you can also click <b>Skip this activity</b>
+      to move on without answering). It will never make up facts, dates, or numbers.</li>
 </ol>`;
     },
     how_to(frm) {
@@ -675,7 +703,7 @@ const QMR = {
 
         const toolbar = `
 <div class="qmr-toolbar">
-  <button class="qmr-btn primary" data-draftall title="Fill Evaluation Text and Improvement Action for every activity that is still blank in this record.">Draft all empty</button>
+  <button class="qmr-btn primary" data-draftall title="Fill Evaluation Text and Improvement Action for every activity that is still blank in this record. If one needs more information, it will ask you, one activity at a time.">Draft all empty</button>
   <button class="qmr-btn" data-grounding title="Check the procedure loaded from the Quality Procedure record for this criterion, and pick the AI model. The AI writes only from that procedure, so it stays honest.">Grounding &amp; model</button>
   <button class="qmr-btn" data-howto title="A short step by step, in plain language.">How to use</button>
   <span class="qmr-ground ${has_proc ? "qmr-ground-ok" : "qmr-ground-no"}" title="${criterion ? (has_proc ? "Loaded from Quality Procedure " + this.esc(proc.name) + "." : this.esc(this.no_procedure_message(criterion, proc))) : ""}">
@@ -758,12 +786,14 @@ const QMR = {
             const label = $b.text();
             $b.text("Drafting...").prop("disabled", true);
             try {
-                const r = await self.draft_row(frm, idx);
-                if (r === "ok") { self.render(frm); frappe.show_alert({ message: "Drafted activity #" + idx + ". Review, then Save.", indicator: "blue" }); }
-                else if (r && r.status === "need_input") {
+                let r = await self.draft_row(frm, idx);
+                if (r && r.status === "need_input") {
                     const row = getRow(idx);
-                    self.answer_need_input(frm, idx, row && row.activity_name, r.question);
+                    $b.text("Needs input...");
+                    r = await self.ask_and_redraft(frm, idx, row && row.activity_name, r.question);
                 }
+                if (r === "ok") { self.render(frm); frappe.show_alert({ message: "Drafted activity #" + idx + ". Review, then Save.", indicator: "blue" }); }
+                else if (r === "skipped") { frappe.show_alert({ message: "Skipped.", indicator: "orange" }); }
             } finally {
                 $b.text(label).prop("disabled", false);
             }
